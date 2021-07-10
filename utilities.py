@@ -12,18 +12,26 @@ logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
 
 @dataclass
 class TableDef:
-    cols: list
+    cols: dict
     key: str = 'default'
 
-    def is_allow_col(self, col_name: str) -> bool:
+    def is_allow_col(self, col_key: str) -> bool:
         if not self.cols or len(self.cols) < 1:
             return True
-        return col_name in self.cols
+        return col_key in self.cols.keys()
+
+    def col_width(self, col_key: str) -> int:
+        if not self.cols or len(self.cols) < 1:
+            return 15
+        return self.cols[col_key].width
+
+    def col_name(self, col_key: str) -> str:
+        return self.cols[col_key].col_name
 
 
 @dataclass
 class TgTable:
-    tbl_def: TableDef = TableDef([])
+    tbl_def: TableDef = TableDef({})
     key: str = 'default'
     col_dic: dict = field(default_factory=dict)
     row_li: list = field(default_factory=list)
@@ -33,9 +41,11 @@ class TgTable:
 class TgColumn:
     key: str
     pos: int
-    name: str
+    col_name: str
     width: int = -1
     cel_li: list = field(default_factory=list)
+
+
 
 
 @dataclass
@@ -53,6 +63,7 @@ class TgCell:
     row: TgRow
     val: str
 
+COL_POS = TgColumn('position', 0, 'Row', 4)
 
 @dataclass
 class TgCommand:
@@ -90,14 +101,17 @@ def dc_dic_to_table(dc_dic: dict, tbl_def: TableDef) -> TgTable:
             val_dic = v
         else:
             val_dic = v.as_dict_ext()
-        row: TgRow = TgRow(tbl, str(k), count + 1, [], val_dic)
+        row_nr = count + 1
+        row: TgRow = TgRow(tbl, str(k), row_nr, [], val_dic)
         tbl.row_li.append(row)
+        if COL_POS.key not in tbl.col_dic.keys():
+            tbl.col_dic.update({COL_POS.key: TgColumn(COL_POS.key, COL_POS.pos, COL_POS.col_name, COL_POS.width)})
         for k_, v_ in val_dic.items():
             if not tbl.tbl_def.is_allow_col(k_):
                 continue
             if k_ in tbl.col_dic.keys():
                 continue
-            col: TgColumn = TgColumn(k_, tbl.tbl_def.cols.index(k_) + 1, k_, width=15)
+            col: TgColumn = TgColumn(k_, -1, tbl_def.col_name(k_), width=tbl_def.col_width(k_))
             logger.debug(f'append col: {col}')
             tbl.col_dic.update({col.key: col})
         count += 1
@@ -113,21 +127,24 @@ def table_print(tbl: TgTable) -> str:
     tbl_str: str = ""
     for row in tbl.row_li:
         row_str = ""
-        for col_key in tbl.tbl_def.cols:
+        for col_key in tbl.tbl_def.cols.keys():
             col = tbl.col_dic[col_key]
-            if col_key not in row.val_dic.keys():
+            if col_key == COL_POS.key:
+                cel_val = str(tbl.row_li.index(row) + 1)
+            elif col_key not in row.val_dic.keys():
                 row_str = row_str + str('').ljust(col.width) + " | "
                 continue
-            cel_val = str(row.val_dic[col_key])
+            else:
+                cel_val = str(row.val_dic[col_key])
             cel_val = str(cel_val[:col.width]).ljust(col.width)
             row_str = row_str + cel_val + " | "
         tbl_str = tbl_str + f'{row_str}\n'
     row_str = ''
     row_hr = ''
-    for col_key in tbl.tbl_def.cols:
+    for col_key in tbl.tbl_def.cols.keys():
         col = tbl.col_dic[col_key]
         row_hr = row_hr + str('').ljust(col.width, '_') + '___'
-        row_str = row_str + str(col.name[:col.width]).ljust(col.width) + " | "
+        row_str = row_str + str(col.col_name[:col.width]).ljust(col.width) + " | "
     tbl_str = f'{row_hr}\n{row_str}\n{row_hr}\n{tbl_str}{row_hr}'
 
     if logger.isEnabledFor(logging.DEBUG):
@@ -157,7 +174,7 @@ def now_for_sql() -> str:
 
 def main():
     print(now_for_sql())
-    command = TgCommand(name='test', long_name='test', description="test", args=dict(), handler=None)
+    command = TgCommand(name='test', long_name='test', description="test", args=[], handler=None)
     print(command, command.name, command.args, command.handler)
 
 

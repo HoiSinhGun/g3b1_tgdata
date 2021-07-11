@@ -1,18 +1,20 @@
 import json
 import logging
+import os
 import traceback
 from pydoc import html
 
 from telegram import Message, Update, ParseMode
 from telegram.ext import CallbackContext, Updater, CommandHandler, MessageHandler, Filters
 
+import subscribe_db
 from tg_db import tg_db_create_tables, synchronize_from_message
 
 from log.g3b1_log import cfg_logger
 
 # This can be your own ID, or one for a developer group/channel.
 # You can use the /start command of this bot to see your chat id.
-from utilities import TgCommand
+from utilities import TgCommand, get_module_name
 
 DEVELOPER_CHAT_ID = -579559871
 
@@ -46,11 +48,14 @@ def error_handler(update: object, context: CallbackContext) -> None:
     context.bot.send_message(chat_id=DEVELOPER_CHAT_ID, text=message, parse_mode=ParseMode.HTML)
 
 
-def start_bot(bot_token, commands: dict, start: callable, hdl_message: callable = None):
+def start_bot(file: str, commands: dict, start: callable, hdl_message: callable = None):
     """Run the bot."""
     # my_persistence = PicklePersistence(filename='c:\\dev\\tg\\tg_data.txt')
+    module_name = get_module_name(file)
+    bot_dict: dict = subscribe_db.bot_all()[module_name]
+    bot_token = bot_dict['token']
 
-    # Create the Updater and pass it your bot's token.
+# Create the Updater and pass it your bot's token.
     updater = Updater(bot_token)
 
     # Get the dispatcher to register handlers

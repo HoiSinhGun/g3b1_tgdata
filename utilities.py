@@ -1,10 +1,13 @@
+import inspect
 import logging
+import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Callable
 
 from telegram import Update
 
+import callee
 from log.g3b1_log import cfg_logger
 
 logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
@@ -30,14 +33,6 @@ class TableDef:
 
 
 @dataclass
-class TgTable:
-    tbl_def: TableDef = TableDef({})
-    key: str = 'default'
-    col_dic: dict = field(default_factory=dict)
-    row_li: list = field(default_factory=list)
-
-
-@dataclass
 class TgColumn:
     key: str
     pos: int
@@ -46,6 +41,12 @@ class TgColumn:
     cel_li: list = field(default_factory=list)
 
 
+@dataclass
+class TgTable:
+    tbl_def: TableDef = TableDef({})
+    key: str = 'default'
+    col_dic: dict = field(default_factory=dict)
+    row_li: list = field(default_factory=list)
 
 
 @dataclass
@@ -63,7 +64,9 @@ class TgCell:
     row: TgRow
     val: str
 
+
 COL_POS = TgColumn('position', 0, 'Row', 4)
+
 
 @dataclass
 class TgCommand:
@@ -92,7 +95,7 @@ def lod_to_dic(lod: list) -> dict:
 
 
 def dc_dic_to_table(dc_dic: dict, tbl_def: TableDef) -> TgTable:
-    tbl: TgTable = TgTable(tbl_def)
+    tbl: TgTable = TgTable(tbl_def, col_dic=tbl_def.cols)
     count: int = 0
     # count_col: int = 0
     for k, v in dc_dic.items():
@@ -112,10 +115,47 @@ def dc_dic_to_table(dc_dic: dict, tbl_def: TableDef) -> TgTable:
             if k_ in tbl.col_dic.keys():
                 continue
             col: TgColumn = TgColumn(k_, -1, tbl_def.col_name(k_), width=tbl_def.col_width(k_))
-            logger.debug(f'append col: {col}')
+            # logger.debug(f'append col: {col}')
             tbl.col_dic.update({col.key: col})
         count += 1
     return tbl
+
+
+def print_header_line(text: str):
+    print("".ljust(80, "="))
+    print(f'=== {text.upper()} '[:76].ljust(76) + ' ===')
+    print("".ljust(80, "="))
+
+
+def get_script_name(file: str) -> str:
+    file_name = os.path.basename(file)
+    # file name without extension
+    return os.path.splitext(file_name)[0]
+
+
+def get_module_name(file: str) -> str:
+    """E.g. python script base file = subscribe_main.py => subscribe"""
+    return get_script_name(file).split("_")[0]
+
+
+def get_module() -> str:
+    module = get_caller_info()[1].split("_")[0]
+    logger.debug(f"module requested: {module}")
+    return module
+
+
+def get_caller_info() -> (str, str):
+    # first get the full filename (including path and file extension)
+    # print(inspect.stack())
+    caller_frame = inspect.stack()[2]
+    caller_filename_full = caller_frame.filename
+
+    # now get rid of the directory (via basename)
+    # then split filename and extension (via splitext)
+    caller_filename_only = os.path.splitext(os.path.basename(caller_filename_full))[0]
+
+    # return both filename versions as tuple
+    return caller_filename_full, caller_filename_only
 
 
 def table_print(tbl: TgTable) -> str:
@@ -147,8 +187,8 @@ def table_print(tbl: TgTable) -> str:
         row_str = row_str + str(col.col_name[:col.width]).ljust(col.width) + " | "
     tbl_str = f'{row_hr}\n{row_str}\n{row_hr}\n{tbl_str}{row_hr}'
 
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f'\n{tbl_str}')
+    # if logger.isEnabledFor(logging.DEBUG):
+    #    logger.debug(f'\n{tbl_str}')
     return tbl_str
 
 

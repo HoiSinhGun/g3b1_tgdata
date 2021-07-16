@@ -1,13 +1,16 @@
+import ast
 import inspect
 import logging
 import os
+from ast import arg
+from ast import FunctionDef
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Callable
 
 from telegram import Update
 
-import callee
+# import subscribe_main
 from log.g3b1_log import cfg_logger
 
 logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
@@ -69,20 +72,80 @@ COL_POS = TgColumn('position', 0, 'Row', 4)
 
 
 @dataclass
-class TgCommand:
-    name: str
-    long_name: str
+class G3Module:
+    file_main: str = field(repr=False)
+    li_col_dct: dict = field(repr=False)
+    cmd_dct: dict = field(default=None, repr=False)
+    name: str = field(init=False)
+    src_code: str = field(init=False, repr=False)
+
+    def __post_init__(self):
+        self.name = module_by_file_str(self.file_main)
+        with open(self.file_main, 'r') as f:
+            self.src_code = f.read()
+
+
+g3_m_dct = {}
+
+
+def cmd_dct_by(mod_str: str) -> dict:
+    return g3_m_dct[mod_str].cmd_dct
+
+
+@dataclass
+class G3Command:
+    g3_m: G3Module
     handler: Callable
-    description: str
-    args: list = ()
+    args: list[arg]  # = field(init=False, repr=True)
+    name: str = field(init=False, repr=True)
+    long_name: str = field(init=False, repr=True)
+    description: str = field(init=False, repr=True)
+
+    def __post_init__(self):
+        # Note: handler is not passed as an argument
+        # here anymore, because it is not an
+        # `InitVar` anymore.
+        self.long_name = str(self.handler.__name__).replace("hdl_cmd_", "")
+        self.name = self.long_name.replace(f'{self.g3_m.name}_', "")
+        self.description = self.handler.__doc__
 
     def as_dict_ext(self) -> dict:
         values = asdict(self)
         new_dict = dict()
-        for item in values.keys():
-            if values[item]:
-                new_dict[item] = values[item]
+        for key in values.keys():
+            if values[key]:
+                new_dict[key] = values[key]
         return new_dict
+
+
+def read_functions(py_file: str):
+    filename = py_file
+    with open(filename) as file:
+        node = ast.parse(file.read())
+    n: FunctionDef
+
+    func_li = [n for n in node.body if isinstance(n, ast.FunctionDef) and n.name.startswith('hdl_cmd_')]
+
+    # for function in func_li:
+    #    print(function.name)
+    return func_li
+
+
+def initialize_g3_m_dct(g3_m_file: str, li_col_dct: dict) -> G3Module:
+    g3_m = G3Module(g3_m_file, li_col_dct)
+    cmd_dct = {}
+    hdl: ast.FunctionDef
+    hdl_li = read_functions(g3_m_file)
+    for hdl in hdl_li:
+        script = script_by_file_str(g3_m.file_main)
+        cpl = compile(f"import {script}\n", "<string>", "exec")
+        exec(cpl)
+        g3_cmd = G3Command(g3_m, eval(f'{script}.{hdl.name}'), hdl.args.args)
+        cmd_dct.update({g3_cmd.name: g3_cmd})
+        logger.debug(g3_cmd)
+    g3_m.cmd_dct = cmd_dct
+    g3_m_dct.update({g3_m.name: g3_m})
+    return g3_m
 
 
 def lod_to_dic(lod: list) -> dict:
@@ -127,24 +190,35 @@ def print_header_line(text: str):
     print("".ljust(80, "="))
 
 
-def get_script_name(file: str) -> str:
+def script_by_file_str(file: str) -> str:
     file_name = os.path.basename(file)
     # file name without extension
     return os.path.splitext(file_name)[0]
 
 
-def get_module_name(file: str) -> str:
+def module_by_file_str(file: str) -> str:
     """E.g. python script base file = subscribe_main.py => subscribe"""
-    return get_script_name(file).split("_")[0]
+    return script_by_file_str(file).split("_")[0]
 
 
-def get_module() -> str:
-    module = get_caller_info()[1].split("_")[0]
+def g3_cmd_by_func(func) -> G3Command:
+    g3_m_str = str(func.__module__).split("_")[0]
+    g3_m: G3Module = g3_m_dct[g3_m_str]
+    prefix: str = f'hdl_cmd_'  # {g3_m_str}_'
+    len_prefix: int = len(prefix)
+    f_name = str(func.__name__)
+    cmd_name = f_name[len_prefix:len(f_name)]
+    g3_cmd: G3Command = g3_m.cmd_dct[cmd_name]
+    return g3_cmd
+
+
+def module_by_inspect() -> str:
+    module = cinfo_by_inspect()[1].split("_")[0]
     logger.debug(f"module requested: {module}")
     return module
 
 
-def get_caller_info() -> (str, str):
+def cinfo_by_inspect() -> (str, str):
     # first get the full filename (including path and file extension)
     # print(inspect.stack())
     caller_frame = inspect.stack()[2]
@@ -192,10 +266,14 @@ def table_print(tbl: TgTable) -> str:
     return tbl_str
 
 
-def build_commands_str(commands: dict):
+def build_commands_str(commands: dict[str, G3Command]):
     commands_str = ''
-    for key, tg_command in commands.items():
-        commands_str += f'/{tg_command.long_name} {tg_command.args}: {tg_command.description}\n'
+    for key, g3_cmd in commands.items():
+        args_str = '['
+        for item in g3_cmd.args:
+            args_str += item.arg + ', '
+        args_str = args_str[:len(args_str)-2] + ']'
+        commands_str += f'/{g3_cmd.long_name} {args_str}: {g3_cmd.description}\n'
     return commands_str
 
 
@@ -213,9 +291,13 @@ def now_for_sql() -> str:
 
 
 def main():
+    import subscribe_main
+    g3_m_dct.update({'subscribe': initialize_g3_m_dct(subscribe_main.__file__, {})})
     print(now_for_sql())
-    command = TgCommand(name='test', long_name='test', description="test", args=[], handler=None)
-    print(command, command.name, command.args, command.handler)
+    g3_m: G3Module = g3_m_dct['subscribe']
+    g3_cmd: G3Command
+    for g3_cmd_str, g3_cmd in g3_m.cmd_dct.items():
+        print(g3_cmd.name, g3_cmd.description, g3_cmd.args, g3_cmd.handler)
 
 
 if __name__ == '__main__':

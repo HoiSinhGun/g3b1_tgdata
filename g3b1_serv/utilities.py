@@ -2,18 +2,22 @@ import ast
 import inspect
 import logging
 import os
-from ast import arg
 from ast import FunctionDef
+from ast import arg
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Callable
 
-from telegram import Update
+from sqlalchemy.engine import LegacyRow
+from telegram import Update, Message
+
+from g3b1_data import tg_db
+from g3b1_log.g3b1_log import cfg_logger
+from g3b1_serv import tg_reply
 
 # import subscribe_main
-from log.g3b1_log import cfg_logger
 
-logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
+logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
 
 @dataclass
@@ -81,14 +85,16 @@ class G3Module:
 
     def __post_init__(self):
         self.name = module_by_file_str(self.file_main)
-        with open(self.file_main, 'r') as f:
-            self.src_code = f.read()
+        # with open(self.file_main, 'r') as f:
+        #     self.src_code = f.read()
 
 
-g3_m_dct = {}
+g3_m_dct: dict[str, G3Module] = {}
 
 
 def cmd_dct_by(mod_str: str) -> dict:
+    if mod_str == 'translate':
+        mod_str = 'trans'
     return g3_m_dct[mod_str].cmd_dct
 
 
@@ -105,8 +111,8 @@ class G3Command:
         # Note: handler is not passed as an argument
         # here anymore, because it is not an
         # `InitVar` anymore.
-        self.long_name = str(self.handler.__name__).replace("hdl_cmd_", "")
-        self.name = self.long_name.replace(f'{self.g3_m.name}_', "")
+        self.long_name = str(self.handler.__name__).replace('cmd_', f'{self.g3_m.name}_', 1)
+        self.name = self.long_name.replace(f'{self.g3_m.name}_', '')
         self.description = self.handler.__doc__
 
     def as_dict_ext(self) -> dict:
@@ -117,6 +123,37 @@ class G3Command:
                 new_dict[key] = values[key]
         return new_dict
 
+    def extra_args(self) -> list[arg]:
+        arg_li = list[arg]()
+        for item in self.args:
+            if item.arg not in ['upd', 'ctx', 'reply_to_msg', 'src_msg', 'reply_to_user_id', 'chat_id', 'user_id']:
+                arg_li.append(item)
+        return arg_li
+
+    def arg_req(self, arg_name: str) -> bool:
+        for item in self.args:
+            if item.arg == arg_name:
+                return True
+        return False
+
+    def arg_req_ctx(self) -> bool:
+        return self.arg_req('ctx')
+
+    def arg_req_user(self) -> bool:
+        return self.arg_req('user_id')
+
+    def arg_req_chat(self) -> bool:
+        return self.arg_req('chat_id')
+
+    def arg_req_reply_to_msg(self) -> bool:
+        return self.arg_req('reply_to_msg')
+
+    def arg_req_src_msg(self) -> bool:
+        return self.arg_req('src_msg')
+
+    def arg_req_reply_to_user_id(self) -> bool:
+        return self.arg_req('reply_to_user_id')
+
 
 def read_functions(py_file: str):
     filename = py_file
@@ -124,7 +161,7 @@ def read_functions(py_file: str):
         node = ast.parse(file.read())
     n: FunctionDef
 
-    func_li = [n for n in node.body if isinstance(n, ast.FunctionDef) and n.name.startswith('hdl_cmd_')]
+    func_li = [n for n in node.body if isinstance(n, ast.FunctionDef) and n.name.startswith('cmd_')]
 
     # for function in func_li:
     #    print(function.name)
@@ -138,9 +175,9 @@ def initialize_g3_m_dct(g3_m_file: str, li_col_dct: dict) -> G3Module:
     hdl_li = read_functions(g3_m_file)
     for hdl in hdl_li:
         script = script_by_file_str(g3_m.file_main)
-        cpl = compile(f"import {script}\n", "<string>", "exec")
+        cpl = compile(f"import {g3_m.name}\nfrom {g3_m.name} import {script}\n", "<string>", "exec")
         exec(cpl)
-        g3_cmd = G3Command(g3_m, eval(f'{script}.{hdl.name}'), hdl.args.args)
+        g3_cmd = G3Command(g3_m, eval(f'{g3_m.name}.{script}.{hdl.name}'), hdl.args.args)
         cmd_dct.update({g3_cmd.name: g3_cmd})
         logger.debug(g3_cmd)
     g3_m.cmd_dct = cmd_dct
@@ -197,17 +234,21 @@ def script_by_file_str(file: str) -> str:
 
 
 def module_by_file_str(file: str) -> str:
-    """E.g. python script base file = subscribe_main.py => subscribe"""
+    """E.g. python script base file = tg_hdl.py => subscribe.
+    """
+    if file.endswith('__init__.py') or file.endswith('tg_hdl.py'):
+        return file.split(os.sep)[-2]
     return script_by_file_str(file).split("_")[0]
 
 
-def g3_cmd_by_func(func) -> G3Command:
-    g3_m_str = str(func.__module__).split("_")[0]
+def g3_cmd_by_func(cmd_func) -> G3Command:
+    g3_m_str = str(cmd_func.__module__).split(".")[0]
     g3_m: G3Module = g3_m_dct[g3_m_str]
-    prefix: str = f'hdl_cmd_'  # {g3_m_str}_'
+    prefix: str = f'cmd_'  # {g3_m_str}_'
     len_prefix: int = len(prefix)
-    f_name = str(func.__name__)
+    f_name = str(cmd_func.__name__)
     cmd_name = f_name[len_prefix:len(f_name)]
+    cmd_name = cmd_name.replace(f'{g3_m_str}_', "")
     g3_cmd: G3Command = g3_m.cmd_dct[cmd_name]
     return g3_cmd
 
@@ -244,7 +285,11 @@ def table_print(tbl: TgTable) -> str:
         for col_key in tbl.tbl_def.cols.keys():
             col = tbl.col_dic[col_key]
             if col_key == COL_POS.key:
-                cel_val = str(tbl.row_li.index(row) + 1)
+                pos = str(tbl.row_li.index(row) + 1)
+                cel_val = pos
+                # cel_val = f'<a href="/dl_{pos}">{pos}</a>'
+                # url = create_deep_linked_url('@g3b1_translate_bot', pos)
+                # cel_val = f'{pos}: <a href={url}>{pos}</a>'
             elif col_key not in row.val_dic.keys():
                 row_str = row_str + str('').ljust(col.width) + " | "
                 continue
@@ -266,14 +311,15 @@ def table_print(tbl: TgTable) -> str:
     return tbl_str
 
 
-def build_commands_str(commands: dict[str, G3Command]):
+def build_commands_str(commands: dict[str, G3Command], cmd_scope=''):
     commands_str = ''
     for key, g3_cmd in commands.items():
         args_str = '['
-        for item in g3_cmd.args:
+        for item in g3_cmd.extra_args():
             args_str += item.arg + ', '
-        args_str = args_str[:len(args_str)-2] + ']'
-        commands_str += f'/{g3_cmd.long_name} {args_str}: {g3_cmd.description}\n'
+        args_str = args_str[:len(args_str) - 2] + ']'
+        if not cmd_scope or g3_cmd.name[:len(cmd_scope)] == cmd_scope:
+            commands_str += f'/{g3_cmd.name} {args_str}: {g3_cmd.description}\n'
     return commands_str
 
 
@@ -290,9 +336,27 @@ def now_for_sql() -> str:
     return dt_string
 
 
+def upd_extract_chat_user_id(upd: Update) -> (int, int):
+    return upd.effective_chat.id, upd.effective_user.id
+
+
+def read_latest_cmd(upd: Update, g3_m: G3Module) -> Message:
+    return read_latest_message(*upd_extract_chat_user_id(upd), is_cmd_explicit=True, g3_m=g3_m)
+
+
+def read_latest_message(chat_id, user_id, is_cmd_explicit=False, g3_m: G3Module = None) -> Message:
+    row: LegacyRow = tg_db.read_latest_message(chat_id, user_id, is_cmd_explicit, g3_m).result
+    if not row:
+        return None
+    dt_object = datetime.strptime(row['date'], '%Y-%m-%d %H:%M:%S')
+    message = Message(row['ext_id'], dt_object, row['tg_chat_id'],
+                      row['tg_user_id'], text=row['text'])
+    return message
+
+
 def main():
-    import subscribe_main
-    g3_m_dct.update({'subscribe': initialize_g3_m_dct(subscribe_main.__file__, {})})
+    from subscribe import tg_hdl
+    g3_m_dct.update({'subscribe': initialize_g3_m_dct(tg_hdl.__file__, {})})
     print(now_for_sql())
     g3_m: G3Module = g3_m_dct['subscribe']
     g3_cmd: G3Command
@@ -302,3 +366,17 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+def hdl_retco(upd: Update, logto: logging.Logger, retco):
+    if not retco or retco[0] != 0:
+        logto.error(f'retco: {retco}')
+        tg_reply.cmd_err(upd)
+        return
+
+    tg_reply.cmd_success(upd)
+    return
+
+
+def is_msg_w_cmd(text: str = None) -> bool:
+    return text.startswith('.') or text.startswith('/')

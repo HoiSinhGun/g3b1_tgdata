@@ -1,7 +1,12 @@
 import logging
+from dataclasses import MISSING
 
 
-def cfg_logger(logger: logging.Logger, level=logging.WARN) -> logging.Logger:
+def cfg_logger(logger: logging.Logger = logging.getLogger(__name__),
+               level=logging.WARN,
+               name=MISSING) -> logging.Logger:
+    if name is not MISSING and len(str(name).strip()) > 1:
+        logger = logging.getLogger(name)
     logger.setLevel(level)
     # create console handler and set level to debug
     ch = logging.StreamHandler()
@@ -33,4 +38,3 @@ def cfg_log_tc(name: str, level=logging.INFO) -> logging.Logger:
     # add ch to logger
     logger.addHandler(ch)
     return logger
-

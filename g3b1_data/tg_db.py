@@ -1,14 +1,18 @@
 import logging
 
 from sqlalchemy import Table
-from sqlalchemy import MetaData, create_engine
+from sqlalchemy import and_, MetaData, create_engine, func, select
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.engine import Result
 from sqlalchemy.engine.mock import MockConnection
+from sqlalchemy.sql import Select
 from telegram import Message, Chat, User  # noqa
-from tg_db_sqlite import tg_db_create_tables
 
+from g3b1_data.model import G3Result
+from g3b1_data.tg_db_sqlite import tg_db_create_tables
 # create console handler and set level to debug
-from log.g3b1_log import cfg_logger
+from g3b1_log.g3b1_log import cfg_logger
+from g3b1_serv.utilities import G3Module
 
 DB_FILE_TG = r'C:\Users\IFLRGU\Documents\dev\g3b1_tg.db'
 MetaData_TG = MetaData()
@@ -19,6 +23,28 @@ logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
 
 TABLE_TG_USER = "tg_user"
 TABLE_TG_CHAT = "tg_chat"
+
+
+def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3_mod: G3Module = None):
+    with Engine_TG.connect() as con:
+        tg_table: Table = MetaData_TG.tables["tg_message"]
+        cols = tg_table.columns
+        sql_sel: Select = select(cols['tg_chat_id'], cols['ext_id'], cols['tg_user_id'],
+                                 func.max(cols['date']).label('date'), cols['text'])
+        where_clause = ((cols.tg_chat_id == chat_id) | (cols.tg_user_id == user_id) | (
+                    cols.g3_cmd_explicit == is_cmd_explicit))
+        if g3_mod:
+            where_clause = (where_clause & (cols.bot_module == g3_mod.name))
+        sql_sel = sql_sel.where(where_clause)
+
+        logger.debug(sql_sel)
+        rs: Result = con.execute(sql_sel)
+        result = rs.first()
+
+        if not result:
+            return G3Result(4, None)
+
+        return G3Result(0, result)
 
 
 def synchronize_user(con: MockConnection, row: User):
@@ -49,12 +75,19 @@ def synchronize_chat(con: MockConnection, row: Chat):
     con.execute(tg_insert)
 
 
-def synchronize_message(con: MockConnection, row: Message):
+def synchronize_message(con: MockConnection,
+                        row: Message,
+                        g3_cmd_long_str: str = None, is_command_explicit: bool = None):
     tg_table: Table = MetaData_TG.tables["tg_message"]
     logger.debug(f"Table: {tg_table}")
     logger.debug(f"Row: {row}")
+    bot_module: str = row.bot.username.split('_')[1]
+    if bot_module == 'translate':
+        bot_module = 'trans'
     values = dict(ext_id=row.message_id, tg_user_id=row.from_user.id, tg_chat_id=row.chat.id,
-                  date=row.date.strftime('%Y-%m-%d %H:%M:%S'), text=row.text
+                  date=row.date.strftime('%Y-%m-%d %H:%M:%S'), text=row.text,
+                  bot_module=bot_module,
+                  g3_cmd=g3_cmd_long_str, g3_cmd_explicit=is_command_explicit
                   )
     tg_insert: insert = insert(tg_table).values(values).on_conflict_do_update(
         index_elements=['tg_chat_id', 'ext_id'],
@@ -65,14 +98,18 @@ def synchronize_message(con: MockConnection, row: Message):
     Engine_TG.execute(tg_insert)
 
 
-def synchronize_from_message(message: Message) -> None:
+def synchronize_from_message(
+        message: Message, g3_cmd_long_str: str = None, is_command_explicit: bool = None) \
+        -> None:
     """ Doc
     """
-
     with Engine_TG.connect() as con:
-        synchronize_user(con, message.from_user)
+        if not message.from_user:
+            logger.error(f'message.from_user empty?')
+        else:
+            synchronize_user(con, message.from_user)
         synchronize_chat(con, message.chat)
-        synchronize_message(con, message)
+        synchronize_message(con, message, g3_cmd_long_str, is_command_explicit)
 
 
 def externalize_user_id(bot_bkey: str, id_: int) -> None:
@@ -103,6 +140,26 @@ def externalize_id(bot_bkey: str, tg_tbl_name: str, id_: int) -> None:
         )
         logger.debug(f"Insert statement: {ext_insert}")
         con.execute(ext_insert)
+
+
+def sel_msg_rng_by_chat_user(from_msg_id, chat_id, user_id) -> G3Result[list[dict]]:
+    with Engine_TG.connect() as con:
+        tg_table: Table = MetaData_TG.tables["tg_message"]
+        cols = tg_table.columns
+        sql_sel: Select = select(cols['tg_chat_id'], cols['ext_id'], cols['tg_user_id'],
+                                 cols['date'], cols['text'])
+        sql_sel = sql_sel.where(cols.tg_chat_id == chat_id, cols.tg_user_id == user_id,
+                                cols.ext_id >= from_msg_id,
+                                cols.g3_cmd_explicit == False)
+        logger.debug(sql_sel)
+        rs: Result = con.execute(sql_sel)
+        rs = rs.fetchall()
+        msg_dct_li = []
+        for row in rs:
+            d = dict(row)
+            msg_dct_li.append(d)
+
+        return G3Result(0, msg_dct_li)
 
 
 def main() -> None:

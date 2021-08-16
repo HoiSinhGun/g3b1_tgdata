@@ -9,14 +9,23 @@ from telegram.ext import CallbackContext, Dispatcher
 from telegram.utils.helpers import DEFAULT_NONE
 from telegram.utils.types import ODVInput, DVInput, JSONDict
 
-import subscribe_db
-import utilities
-from log.g3b1_log import cfg_log_tc
+from g3b1_log.g3b1_log import cfg_log_tc
+from g3b1_serv import utilities
+from subscribe.data import db
 
 logger = cfg_log_tc(__name__, logging.INFO)
 
 
+class MsgCallback(object):
+    msg_li: list[str] = []
+
+    def add_msg(self, msg_str: str):
+        self.msg_li.append(msg_str)
+
+
 class MyMessage(Message):
+
+    msg_callback: MsgCallback
 
     @staticmethod
     def from_data_dict(data_dct: dict):
@@ -37,17 +46,28 @@ class MyMessage(Message):
                    api_kwargs: JSONDict = None, allow_sending_without_reply: ODVInput[bool] = DEFAULT_NONE,
                    entities: Union[List['MessageEntity'], Tuple['MessageEntity', ...]] = None,
                    quote: bool = None) -> 'Message':
-        logger.info(text)
+        if MyMessage.msg_callback:
+            MyMessage.msg_callback.add_msg(text)
+        else:
+            logger.info(text)
         return self
         # return super().reply_html(text, disable_web_page_preview, disable_notification, reply_to_message_id,
         #                          reply_markup, timeout, api_kwargs, allow_sending_without_reply, entities, quote)
+
+
+def user_default() -> User:
+    return User(1, "Gunnar", False)
+
+
+def chat_default() -> Chat:
+    return Chat(1, constants.CHAT_GROUP)
 
 
 @dataclass
 class TestCaseHdl:
     """TestCase for command handler function"""
     g3_cmd: utilities.G3Command
-    hdl_kwargs_dct: dict[str, str]
+    hdl_kwargs_dct: dict[str, ...]
     # the kwargs value will be = utilities.G3Command.hdl(args, kwargs)
     # all parameters passed to tc_exec(tc: TestCaseHdl
     setup_cmd_li: list[utilities.G3Command] = None
@@ -61,12 +81,11 @@ class TestCaseHdl:
             self.descr += 'No arguments'
         else:
             for k, v in self.hdl_kwargs_dct.items():
-                self.descr += f"{k.rjust(20, ' ')[:20]}={v.ljust(20, ' ')[:20]}"
+                self.descr += f"{k.rjust(15, ' ')[:15]} = {str(v).ljust(20, ' ')[:20]}\n"
 
 
 @dataclass
 class TestSuite:
-    file: str
     dispatcher: Dispatcher = field(init=True, repr=False)
     tc_li: list[TestCaseHdl]
     tc_done_li: list[TestCaseHdl] = field(init=False, repr=False)
@@ -78,35 +97,68 @@ class TestSuite:
     def done_count(self) -> int:
         return len(self.tc_done_li)
 
-    def tc_exec(self, tc: TestCaseHdl, **kwargs):
+    def tc_exec(self, tc: TestCaseHdl, msg_callback: MsgCallback = None):
+        kwargs = tc.hdl_kwargs_dct
         # logger.info("".ljust(80, "="))
         logger.info(f'\n{tc.descr}')
         # logger.info("\n".ljust(80, "="))
         msg_dct = {}
         # if 'message_id' in kwargs:
         #     message_id = kwargs['message_id'] if 'message_id' in kwargs else 1
-        chat: Chat = Chat(kwargs['chat_id'], constants.CHAT_GROUP) if 'chat_id' in kwargs else Chat(1,
-                                                                                                    constants.CHAT_GROUP)
-        first_name: str = kwargs['first_name'] if 'first_name' in kwargs else 'GUNNAR'
-        user_id: int = kwargs['user_id'] if 'user_id' in kwargs else 1
+        chat: Chat
+        if 'chat_id' in kwargs.keys():
+            chat = Chat(int(kwargs['chat_id']), constants.CHAT_GROUP)
+            kwargs.pop('chat_id')
+        else:
+            chat = Chat(1, constants.CHAT_GROUP)
+
+        if 'first_name' in kwargs:
+            first_name: str = kwargs['first_name']
+            kwargs.pop('first_name')
+        else:
+            first_name = 'GUNNAR'
+
+        if 'user_id' in kwargs:
+            user_id: int = int(kwargs['user_id'])
+            kwargs.pop('user_id')
+        else:
+            user_id = 1
+
+        if 'reply_to_msg' in kwargs:
+            reply_to_msg: Message = kwargs['reply_to_msg']
+            kwargs.pop('reply_to_msg')
+        else:
+            reply_to_msg = None
+
         user: User = User(user_id, first_name, False)
         message_id = self.done_count() + 1
         message = MyMessage(message_id, datetime.now(),
-                            chat, user)
+                            chat=chat, from_user=user, reply_to_message=reply_to_msg)
+        MyMessage.msg_callback = msg_callback
         tc.update = Update(self.done_count() + 1, message)
         tc.ctx = CallbackContext(self.dispatcher)
-        tc.g3_cmd.handler(tc.update, tc.ctx, **tc.hdl_kwargs_dct)
+        args = (tc.update, tc.ctx)
+        tc.g3_cmd.handler(*args, **kwargs)
         self.tc_done_li.append(tc)
 
 
-def setup(file: str) -> Dispatcher:
+def upd_builder(message_id: int = -333, chat=Chat(1, constants.CHAT_GROUP),
+                user=User(1, 'Gunnar', False), reply_to_msg=None) -> Update:
+    message = MyMessage(message_id, datetime.now(),
+                        chat=chat, from_user=user, reply_to_message=reply_to_msg)
+    return Update(-333, message)
+
+
+def setup(file: str, li_col_dct: dict[str: utilities.TgColumn] = None) -> Dispatcher:
     g3_m_str = utilities.module_by_file_str(file)
-    script_str = utilities.script_by_file_str(file)
-    code_str = f'import {script_str}\n'
-    cpl = compile(code_str, '<string>', 'exec')
-    exec(cpl)
-    utilities.initialize_g3_m_dct(file, eval(f'{script_str}.COLUMNS_{g3_m_str.upper()}'))
-    dispatcher = Dispatcher(Bot(subscribe_db.bot_all()[g3_m_str]['token']), Queue())
+    if li_col_dct is None:
+        script_str = utilities.script_by_file_str(file)
+        code_str = f'import {script_str}\n'
+        cpl = compile(code_str, '<string>', 'exec')
+        exec(cpl)
+        li_col_dct = eval(f'{script_str}.COLUMNS_{g3_m_str.upper()}')
+    utilities.initialize_g3_m_dct(file, li_col_dct)
+    dispatcher = Dispatcher(Bot(db.bot_all()[g3_m_str]['token']), Queue())
     return dispatcher
 
 

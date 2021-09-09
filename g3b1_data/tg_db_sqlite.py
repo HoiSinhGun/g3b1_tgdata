@@ -2,6 +2,10 @@ import logging
 import sqlite3
 from sqlite3 import Error
 
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from sqlalchemy.event import listen
+from sqlalchemy.pool import Pool
 from telegram import Message, Chat, User  # noqa
 
 DB_FILE=r'C:\Users\IFLRGU\Documents\dev\g3b1_tg.db'
@@ -61,7 +65,7 @@ def connection(conn: sqlite3.Connection):
 
 
 # @create_connection
-@connection(create_conn())
+# @connection(create_conn())
 def tg_db_create_tables(cur: sqlite3.Cursor = None) -> None:
     """Init DB
     :param cur: Cursor object
@@ -109,3 +113,17 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
+
+def my_on_connect(dbapi_con, connection_record):
+    pass
+    # print("New DBAPI connection:", dbapi_con)
+
+listen(Pool, 'connect', my_on_connect)
+
+
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()

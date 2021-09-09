@@ -1,10 +1,12 @@
 import logging
 
+from sqlalchemy import MetaData, create_engine, func, select
 from sqlalchemy import Table
-from sqlalchemy import and_, MetaData, create_engine, func, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.engine import Result
 from sqlalchemy.engine.mock import MockConnection
+from sqlalchemy.event import listen
+from sqlalchemy.pool import Pool
 from sqlalchemy.sql import Select
 from telegram import Message, Chat, User  # noqa
 
@@ -12,7 +14,6 @@ from g3b1_data.model import G3Result
 from g3b1_data.tg_db_sqlite import tg_db_create_tables
 # create console handler and set level to debug
 from g3b1_log.g3b1_log import cfg_logger
-from g3b1_serv.utilities import G3Module
 
 DB_FILE_TG = r'C:\Users\IFLRGU\Documents\dev\g3b1_tg.db'
 MetaData_TG = MetaData()
@@ -25,16 +26,37 @@ TABLE_TG_USER = "tg_user"
 TABLE_TG_CHAT = "tg_chat"
 
 
-def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3_mod: G3Module = None):
+def next_negative_ext_id(chat_id: int, user_id:int) -> G3Result[int]:
+    with Engine_TG.connect() as con:
+        tg_table: Table = MetaData_TG.tables["tg_message"]
+        cols = tg_table.columns
+        sql_sel: Select = select(func.min(cols['ext_id']).label('ext_id'))
+        where_clause = ((cols.tg_chat_id == chat_id) & (cols.tg_user_id == user_id))
+        sql_sel = sql_sel.where(where_clause)
+
+        logger.debug(sql_sel)
+        rs: Result = con.execute(sql_sel)
+        result = rs.first()
+
+        if not result:
+            return G3Result(0, -1)
+
+        ext_id = result['ext_id'] - 1
+        if ext_id >= 0:
+            ext_id = -1
+        return G3Result(0, ext_id)
+
+
+def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3m_str=''):
     with Engine_TG.connect() as con:
         tg_table: Table = MetaData_TG.tables["tg_message"]
         cols = tg_table.columns
         sql_sel: Select = select(cols['tg_chat_id'], cols['ext_id'], cols['tg_user_id'],
                                  func.max(cols['date']).label('date'), cols['text'])
-        where_clause = ((cols.tg_chat_id == chat_id) | (cols.tg_user_id == user_id) | (
-                    cols.g3_cmd_explicit == is_cmd_explicit))
-        if g3_mod:
-            where_clause = (where_clause & (cols.bot_module == g3_mod.name))
+        where_clause = ((cols.tg_chat_id == chat_id) & (cols.tg_user_id == user_id) & (
+                cols.g3_cmd_explicit == is_cmd_explicit))
+        if g3m_str:
+            where_clause = (where_clause & (cols.bot_module == g3m_str))
         sql_sel = sql_sel.where(where_clause)
 
         logger.debug(sql_sel)
@@ -163,6 +185,10 @@ def sel_msg_rng_by_chat_user(from_msg_id, chat_id, user_id) -> G3Result[list[dic
 
 
 def main() -> None:
+    def my_on_connect(dbapi_con, connection_record):
+        print("New DBAPI connection:", dbapi_con)
+
+    listen(Pool, 'connect', my_on_connect)
     tg_db_create_tables()
 
 

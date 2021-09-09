@@ -3,18 +3,18 @@ import json
 import logging
 import traceback
 from pydoc import html
-from typing import Callable
 
 from telegram import Update, ParseMode
 from telegram.ext import CallbackContext, Updater, CommandHandler, MessageHandler, Filters
 
-from g3b1_data.tg_db import tg_db_create_tables
+from entities import Entity
 from g3b1_log.g3b1_log import cfg_logger
 # This can be your own ID, or one for a developer group/channel.
 # You can use the /start command of this bot to see your chat id.
 from g3b1_serv import utilities
-from g3b1_serv.utilities import G3Command, G3Module, module_by_file_str
+from model import *
 from subscribe.data import db
+from tg_db_sqlite import tg_db_create_tables
 
 DEVELOPER_CHAT_ID = -579559871
 
@@ -64,6 +64,14 @@ def tg_handler():
             if ctx and ctx.args:
                 ctx_args = ctx.args
 
+            g3_cmd: G3Command = utilities.g3_cmd_by_func(cmd_func)
+            # noinspection PyTypeChecker
+            ent_ty: Entity = None
+            if g3_cmd.arg_req_ent_ty():
+                # args extraction for generic commands
+                ent_ty = kwargs['ent_ty']
+                kwargs.pop('ent_ty')
+
             # Have kwargs been passed by the caller and are missing in ctx.args?
             # Then we rebuild ctx.args from kwargs
             # Simple g3b1_test, i.e. no analysis of possible mismatches
@@ -85,7 +93,6 @@ def tg_handler():
             # same state, no matter where we come from (testcase, TG, click cmd)
 
             idx_last_ctx_arg = len(ctx_args) - 1
-            g3_cmd: G3Command = utilities.g3_cmd_by_func(cmd_func)
             cmd_arg_li = g3_cmd.extra_args()  # skipping upd, chat_id, user_id
             for idx, item in enumerate(cmd_arg_li):
                 if idx <= idx_last_ctx_arg:
@@ -127,7 +134,10 @@ def tg_handler():
                 new_arg_li.append(chat_id)
             if g3_cmd.arg_req_user():
                 new_arg_li.append(user_id)
-            cmd_func(*new_arg_li, **kwargs)
+            if g3_cmd.arg_req_ent_ty():
+                new_arg_li.append(ent_ty)
+            output = cmd_func(*new_arg_li, **kwargs)
+            return output
 
         return wrapper_handler
 
@@ -152,26 +162,20 @@ def start(upd: Update, ctx: CallbackContext) -> None:
     )
 
 
+# noinspection PyUnusedLocal
 def hdl_message(upd: Update, ctx: CallbackContext) -> None:
     pass
 
 
 def start_bot(file: str,
-              li_col_dct: dict = None,
               hdl_for_message: Callable = hdl_message):
     # ,  hdl_for_start: callable = start, hdl_for_message: callable = hdl_message):
     """Run the bot."""
     bot_li: dict[str, dict] = db.bot_all()
-    module_name = module_by_file_str(file)
-    g3_m: G3Module
-    if li_col_dct is None:
-        li_col_dct = eval(f'{module_name}'
-                          f'.COLUMNS_{module_name}')
-    utilities.initialize_g3_m_dct(file, li_col_dct)
-    g3_m = utilities.g3_m_dct[module_name]
+    g3_m: G3Module = utilities.g3_m_dct_init(file)
     cmd_dct: dict = g3_m.cmd_dct
 
-    bot_dict: dict = bot_li[module_name]
+    bot_dict: dict = bot_li[g3_m.name]
     bot_token = bot_dict['token']
 
     # Create the Updater and pass it your bot's token.
@@ -216,5 +220,5 @@ def main() -> None:
     tg_db_create_tables()
 
 
-if __name__ == '__tgdata_main__':
+if __name__ == '__main__':
     main()

@@ -1,8 +1,8 @@
+from pydoc import html
 from typing import Any
 
-from telegram import Update, Message
-
-from g3b1_serv import utilities
+from elements import Element
+from g3b1_serv.utilities import *
 
 
 def cmd_success(upd: Update):
@@ -39,13 +39,19 @@ def cmd_p_req(upd: Update, param: str, position=1):
 
 def cmd_err_key_exists(upd: Update, obj_ty_descr: str, bkey: str):
     upd.effective_message.reply_html(
-        f'Command failed! {obj_ty_descr}'' with key ''{bkey}'' already exists!'
+        f'Command failed! {obj_ty_descr} with key {bkey} already exists!'
     )
 
 
-def cmd_err_setng_miss(upd: Update, ele_typ: dict):
+def cmd_err_key_not_found(upd: Update, obj_ty_descr: str, bkey: str):
     upd.effective_message.reply_html(
-        f'Command failed! Setting: {ele_typ["id"]} is missing!'
+        f'Command failed! {obj_ty_descr} with key {bkey} not found!'
+    )
+
+
+def cmd_err_setng_miss(upd: Update, ELE_TY: Element):
+    upd.effective_message.reply_html(
+        f'Command failed! Setting: {ELE_TY.id_} is missing!'
     )
 
 
@@ -72,12 +78,20 @@ def reply(upd: Update, reply_str: str):
     upd.effective_message.reply_html(reply_str)
 
 
-def send_table(upd: Update, tbl_def, trans_dct: dict, reply_str: str):
-    if not reply_str:
-        reply_str = ''
-    tbl = utilities.dc_dic_to_table(trans_dct, tbl_def)
-    reply_str += f'<code>{utilities.table_print(tbl)}</code>'
-    upd.effective_message.reply_html(reply_str)
+def send_table(upd: Update, tbl_def, row_data, pfx_str: str):
+    if not pfx_str:
+        pfx_str = ''
+    if type(row_data) == list:
+        tbl: TgTable = row_li_to_table(row_data, tbl_def)
+    else:
+        tbl: TgTable = dc_dic_to_table(row_data, tbl_def)
+
+    step = 20
+    idx_from = 0
+    while idx_from < len(tbl.row_li):
+        reply_str = pfx_str + f'<code>{table_print(tbl, idx_from, idx_from + step)}</code>'
+        upd.effective_message.reply_html(reply_str)
+        idx_from = idx_from + step
 
 
 def code(text: str) -> str:
@@ -99,7 +113,7 @@ def send_settings(upd: Update, setng_dct: dict[str, Any]):
         if k == 'ele_id':
             v = v['id']
         reply_str += f'{k.rjust(k_max)} = {str(v).ljust(v_max)}\n'
-    reply(upd, code(reply_str))
+    reply(upd, code(html.escape(reply_str)))
 
 
 def max_lengths(kv_dct: dict) -> (int, int):
@@ -111,7 +125,7 @@ def max_lengths(kv_dct: dict) -> (int, int):
         if len(k) > k_max:
             k_max = len(k)
         v_len = 20
-        if isinstance(v,str):
+        if isinstance(v, str):
             v_len = len(v)
         if v_len > v_max:
             v_max = v_len

@@ -24,7 +24,6 @@ class MsgCallback(object):
 
 
 class MyMessage(Message):
-
     msg_callback: MsgCallback
 
     @staticmethod
@@ -45,7 +44,7 @@ class MyMessage(Message):
                    reply_markup: ReplyMarkup = None, timeout: ODVInput[float] = DEFAULT_NONE,
                    api_kwargs: JSONDict = None, allow_sending_without_reply: ODVInput[bool] = DEFAULT_NONE,
                    entities: Union[List['MessageEntity'], Tuple['MessageEntity', ...]] = None,
-                   quote: bool = None) -> 'Message':
+                   quote: bool = None, chat_id=None, parse_mode=None) -> 'Message':
         if MyMessage.msg_callback:
             MyMessage.msg_callback.add_msg(text)
         else:
@@ -128,6 +127,7 @@ class TestSuite:
             reply_to_msg: Message = kwargs['reply_to_msg']
             kwargs.pop('reply_to_msg')
         else:
+            # noinspection PyTypeChecker
             reply_to_msg = None
 
         user: User = User(user_id, first_name, False)
@@ -149,16 +149,12 @@ def upd_builder(message_id: int = -333, chat=Chat(1, constants.CHAT_GROUP),
     return Update(-333, message)
 
 
-def setup(file: str, li_col_dct: dict[str: utilities.TgColumn] = None) -> Dispatcher:
-    g3_m_str = utilities.module_by_file_str(file)
-    if li_col_dct is None:
-        script_str = utilities.script_by_file_str(file)
-        code_str = f'import {script_str}\n'
-        cpl = compile(code_str, '<string>', 'exec')
-        exec(cpl)
-        li_col_dct = eval(f'{script_str}.COLUMNS_{g3_m_str.upper()}')
-    utilities.initialize_g3_m_dct(file, li_col_dct)
-    dispatcher = Dispatcher(Bot(db.bot_all()[g3_m_str]['token']), Queue())
+def setup(file: str) -> Dispatcher:
+    g3_m = utilities.g3_m_dct_init(file)
+    bot_row = db.bot_all()[g3_m.name]
+    bot = Bot(bot_row['token'])
+    bot._bot = User(-666, 'bot', True, username=f'g3b1_{bot_row["bkey"]}')
+    dispatcher = Dispatcher(bot, Queue())
     return dispatcher
 
 

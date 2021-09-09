@@ -7,6 +7,8 @@ from sqlalchemy.engine.mock import MockConnection
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.schema import Table
 
+from elements import Element
+from entities import Entity
 from g3b1_data.model import G3Result
 from g3b1_log.g3b1_log import cfg_logger
 
@@ -14,29 +16,29 @@ logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
 
 def chat_setting(
-        chat_id: int, ele: dict[str, str], ele_val: str = None) -> dict[str, ...]:
+        chat_id: int, ele_ty: Element, ele_val: str = None) -> dict[str, ...]:
     """Prepare arg dictionary for a setting for the chat_id
     to read or write"""
-    params = dict(chat_id=chat_id, colname=ele['colname'], ele_id=ele)
+    params = dict(chat_id=chat_id, colname=ele_ty.col_name, ele_ty=ele_ty)
     if ele_val is not None:
         params['ele_val'] = ele_val
     return params
 
 
 def user_setting(
-        user_id: int, ele: dict[str, str], ele_val: str = None) -> dict[str, ...]:
+        user_id: int, ele_ty: Element, ele_val: str = None) -> dict[str, ...]:
     """Prepare arg dictionary for a setting for the user_id
     to read or write"""
-    params = dict(user_id=user_id, colname=ele['colname'])
+    params = dict(user_id=user_id, colname=ele_ty.col_name)
     if ele_val is not None:
         params['ele_val'] = ele_val
     return params
 
 
-def chat_user_setting(chat_id: int, user_id: int, ele_id: dict, ele_val: str = None) -> dict[str, ]:
+def chat_user_setting(chat_id: int, user_id: int, ele_ty: Element, ele_val: str = None) -> dict[str,]:
     """Prepare arg dictionary for a setting for the chat_id/user_id
         to read or write"""
-    params = dict(chat_id=chat_id, user_id=user_id, ele_id=ele_id)
+    params = dict(chat_id=chat_id, user_id=user_id, ele_ty=ele_ty)
     if ele_val is not None:
         params['ele_val'] = ele_val
     return params
@@ -52,12 +54,12 @@ def iup_setting(con: MockConnection, meta_data: MetaData, params: dict[str, ...]
     if is_chat:
         values['tg_chat_id'] = tg_chat_id
         index_elements.append('tg_chat_id')
-    if 'ele_id' in params.keys():
-        ele_id = params['ele_id']['colname']
+    if 'ele_ty' in params.keys():
+        ele_ty: Element = params['ele_ty']
         if params['ele_val'] == 'None':
-            values[ele_id] = None
+            values[ele_ty.col_name] = None
         else:
-            values[ele_id] = params['ele_val']
+            values[ele_ty.col_name] = params['ele_val']
     tbl_settings: Table = meta_data.tables[tbl_name]
 
     insert_stmnt: insert = insert(tbl_settings).values(values).on_conflict_do_update(
@@ -69,12 +71,27 @@ def iup_setting(con: MockConnection, meta_data: MetaData, params: dict[str, ...]
     return G3Result()
 
 
+def sel_cu_setng_ref_li(con: MockConnection, meta_data: MetaData, ele_ty: Element, ele_val: int) -> list[dict[str, ...]]:
+    refs_li = []
+    tbl_settings: Table = meta_data.tables['user_chat_settings']
+    tbl_cols = tbl_settings.columns
+    colname = ele_ty.col_name
+    sql_sel: Select = select(tbl_cols.tg_chat_id, tbl_cols.tg_user_id)
+    sql_sel = sql_sel.where(tbl_cols[colname] == ele_val)
+    rs: Result = con.execute(sql_sel)
+    row_li = rs.fetchall()
+    for row in row_li:
+        setng = chat_user_setting(row['tg_chat_id'], row['tg_user_id'], ele_ty)
+        refs_li.append(setng)
+    return refs_li
+
+
 def read_setting(con: MockConnection, meta_data: MetaData, params: dict[str, ...]) -> G3Result:
     is_chat, is_user, tbl_name, tg_chat_id, tg_user_id = chat_user_setng_params(params)
 
     tbl_settings: Table = meta_data.tables[tbl_name]
     tbl_cols = tbl_settings.columns
-    colname = params['ele_id']['colname']
+    colname = params['ele_ty'].col_name
     sql_sel: Select = select(tbl_settings.columns[colname])
 
     if is_chat and is_user:

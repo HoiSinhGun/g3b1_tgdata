@@ -1,6 +1,6 @@
 import logging
+
 from sqlalchemy import MetaData, select
-from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.engine import Result
 from sqlalchemy.engine.mock import MockConnection
 from sqlalchemy.sql import Select
@@ -50,7 +50,6 @@ def all_tg_user(con: MockConnection, mdata: MetaData) -> list[int]:
 #     )
 #     logger.debug(f"Insert statement: {insert_stmnt}")
 #     con.execute(insert_stmnt)
-
 
 
 # def ins_user_settings(con: MockConnection, meta_data: MetaData, values: dict):

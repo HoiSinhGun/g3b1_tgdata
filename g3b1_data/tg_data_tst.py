@@ -11,14 +11,6 @@ from g3b1_log.g3b1_log import cfg_logger
 logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
 
 
-
-
-
-
-
-
-
-
 def main():
     row: LegacyRow = tg_db.read_latest_message(-566731880).result
     dt_object = datetime.datetime.strptime(row['date'], '%Y-%m-%d %H:%M:%S')

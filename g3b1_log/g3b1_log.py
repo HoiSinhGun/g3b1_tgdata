@@ -7,7 +7,9 @@ def cfg_logger(logger: logging.Logger = logging.getLogger(__name__),
                name=MISSING) -> logging.Logger:
     if name is not MISSING and len(str(name).strip()) > 1:
         logger = logging.getLogger(name)
+
     logger.setLevel(level)
+    logger.propagate = False
     # create console handler and set level to debug
     ch = logging.StreamHandler()
     ch.setLevel(level)

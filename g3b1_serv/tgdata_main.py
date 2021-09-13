@@ -7,7 +7,7 @@ from pydoc import html
 from telegram import Update, ParseMode
 from telegram.ext import CallbackContext, Updater, CommandHandler, MessageHandler, Filters
 
-from entities import Entity
+from entities import EntTy
 from g3b1_log.g3b1_log import cfg_logger
 # This can be your own ID, or one for a developer group/channel.
 # You can use the /start command of this bot to see your chat id.
@@ -66,7 +66,7 @@ def tg_handler():
 
             g3_cmd: G3Command = utilities.g3_cmd_by_func(cmd_func)
             # noinspection PyTypeChecker
-            ent_ty: Entity = None
+            ent_ty: EntTy = None
             if g3_cmd.arg_req_ent_ty():
                 # args extraction for generic commands
                 ent_ty = kwargs['ent_ty']

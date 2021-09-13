@@ -2,8 +2,8 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from trans.data.enums import Lc
 from entities import *
-from sb_enum import Lc
 
 
 @dataclass
@@ -12,7 +12,7 @@ class Element:
     descr: str
     col_name: str = ''
     type: type = None
-    ent_ty: Entity = None
+    ent_ty: EntTy = None
     ui_len: int = -1
     key_li: list[dict[str, str]] = field(init=False, repr=False, compare=False)
 
@@ -20,6 +20,12 @@ class Element:
     def by_col_name(col_name: str) -> "Element":
         for ele in ELE_TY_li:
             if ele.col_name == col_name:
+                return ele
+
+    @staticmethod
+    def by_ent_ty(ent_ty: EntTy) -> "Element":
+        for ele in ELE_TY_li:
+            if ele.ent_ty == ent_ty:
                 return ele
 
     def __post_init__(self) -> None:
@@ -63,7 +69,7 @@ ELE_TY_txt_seq_id = Element(id_='txt_seq_id', descr='Text Sequence', ent_ty=ENT_
 ELE_TY_txt_seq_it_id = Element(id_='txt_seq_it_id', descr='Txt Seq Item', ent_ty=ENT_TY_txt_seq_it)
 ELE_TY_tst_run_id = Element(id_='tst_run_id', descr='Test Run', ent_ty=ENT_TY_tst_run)
 ELE_TY_tst_run_act_id = Element(id_='tst_run_act_id', descr='TstRun Act', ent_ty=ENT_TY_tst_run_act)
-ELE_TY_tst_run_act_sus_id = Element(id_='tst_run_act_sus_id', descr='TstRun AnsSus', ent_ty=ENT_TY_tst_run_ans_sus)
+ELE_TY_tst_run_act_sus_id = Element(id_='tst_run_act_sus_id', descr='TstRun ActSus', ent_ty=ENT_TY_tst_run_act_sus)
 ELE_TY_tst_tplate_id = Element(id_='tst_tplate_id', descr='Test Template', ent_ty=ENT_TY_tst_tplate)
 ELE_TY_tst_tplate_it_id = Element(id_='tst_tplate_it_id', descr='Tst TPlate Item', ent_ty=ENT_TY_tst_tplate_it)
 ELE_TY_tst_tplate_it_ans_id = Element(id_='tst_tplate_it_ans_id', descr='Tst TP It Answer',
@@ -79,4 +85,5 @@ ELE_TY_li = [ELE_TY_bkey, ELE_TY_tst_type,
              ELE_TY_cmd, ELE_TY_cmd_prefix, ELE_TY_send_onyms,
              ELE_TY_txt_seq_id, ELE_TY_txt_seq_it_id,
              ELE_TY_tst_tplate_id, ELE_TY_tst_tplate_it_id, ELE_TY_tst_tplate_it_ans_id,
+             ELE_TY_tst_run_id, ELE_TY_tst_run_act_id, ELE_TY_tst_run_act_sus_id,
              ELE_TY_tst_mode]

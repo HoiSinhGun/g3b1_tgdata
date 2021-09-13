@@ -2,7 +2,7 @@ import importlib
 import logging
 from typing import Any, Callable
 
-from sqlalchemy import select, Column, ForeignKey, text
+from sqlalchemy import select, Column, ForeignKey, text, MetaData
 from sqlalchemy.engine import Row, CursorResult, Engine, Result
 from sqlalchemy.engine.mock import MockConnection
 from sqlalchemy.sql import Select
@@ -21,21 +21,31 @@ def ref_cascade(ent_r) -> list[Table]:
     return tbl_li
 
 
-def ref(ent_r) -> list[Table]:
-    ent_ty: Entity = ent_r.ent_ty()
-    meta_data: MetaData = getattr(
-        importlib.import_module(f'{ent_ty.g3_m_str}.data'), f'MetaData_{ent_ty.g3_m_str.upper()}'
-    )
+def engine_by_ent_ty(ent_ty: EntTy) -> Engine:
     engine: Engine = getattr(
         importlib.import_module(f'{ent_ty.g3_m_str}.data'), f'Engine_{ent_ty.g3_m_str.upper()}'
     )
+    return engine
+
+
+def meta_by_ent_ty(ent_ty: EntTy) -> MetaData:
+    meta_data: MetaData = getattr(
+        importlib.import_module(f'{ent_ty.g3_m_str}.data'), f'MetaData_{ent_ty.g3_m_str.upper()}'
+    )
+    return meta_data
+
+
+def ref(ent_r) -> list[Table]:
+    ent_ty: EntTy = ent_r.ent_ty()
+    meta: MetaData = meta_by_ent_ty(ent_ty)
+    engine: Engine = engine_by_ent_ty(ent_ty)
 
     tbl_li: list[Table] = []
 
-    ref_tbl_dct: dict[Table, list[str]] = ent_ty.ref_tbl_dct(meta_data)
+    ref_tbl_dct: dict[Table, list[str]] = ent_ty.ref_tbl_dct(meta)
 
     with engine.begin() as con:
-        # ent_ty_tbl: Table = meta_data.tables[ent_ty.tbl_name]
+        # ent_ty_tbl: Table = .tables[ent_ty.tbl_name]
         # col_sfx = f'{ent_ty.tbl_name}_id'
         for tbl, col_id_li in ref_tbl_dct.items():
             for col_id in col_id_li:
@@ -78,7 +88,7 @@ def orm(con: MockConnection, tbl: Table, row: Row, from_row_any: Callable, repl_
             sql_stmnt = sql_stmnt.where(fk_tbl.columns.id == int(fk_ref_col_val))
             rs: CursorResult = con.execute(sql_stmnt)
             fk_ref_row: Row = rs.first()
-            ent_ty = Entity.by_tbl_name(fk_tbl.name)
+            ent_ty = EntTy.by_tbl_name(fk_tbl.name)
             repl_dct[col_id] = from_row_any(ent_ty, fk_ref_row)
             break
     return repl_dct

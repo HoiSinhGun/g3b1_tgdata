@@ -10,13 +10,13 @@ import tg_reply
 import tgdata_main
 import utilities
 from elements import EleVal
-from entities import Entity
+from entities import EntTy
 from generic_mdl import TgColumn, TableDef, TgTable
 from model import g3_m_dct, G3Command, G3Module, g3m_str_by_file_str
 
 
 @tgdata_main.tg_handler()
-def cmd_ent_ty_33_li(upd: Update, ent_ty: Entity):
+def cmd_ent_ty_33_li(upd: Update, ent_ty: EntTy):
     meta_data: MetaData = getattr(
         importlib.import_module(f'{ent_ty.g3_m_str}.data'), f'MetaData_{ent_ty.g3_m_str.upper()}'
     )

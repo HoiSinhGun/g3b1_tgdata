@@ -9,7 +9,6 @@ from typing import Any
 from telegram import Update, Message
 
 from g3b1_data import tg_db
-from g3b1_serv import tg_reply
 # import subscribe_main
 from generic_mdl import *
 from model import G3Module, g3_m_dct, G3Command, script_by_file_str
@@ -237,16 +236,6 @@ def read_latest_message(chat_id, user_id, is_cmd_explicit=False, g3_m: G3Module 
     message = Message(row['ext_id'], dt_object, row['tg_chat_id'],
                       row['tg_user_id'], text=row['text'])
     return message
-
-
-def hdl_retco(upd: Update, logto: logging.Logger, retco):
-    if not retco or retco[0] != 0:
-        logto.error(f'retco: {retco}')
-        tg_reply.cmd_err(upd)
-        return
-
-    tg_reply.cmd_success(upd)
-    return
 
 
 def is_msg_w_cmd(text: str = None) -> bool:

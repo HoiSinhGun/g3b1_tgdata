@@ -1,8 +1,13 @@
+import logging
 from pydoc import html
 from typing import Any
 
+from telegram import Update, Message, ParseMode
+
 from elements import Element
-from g3b1_serv.utilities import *
+from generic_mdl import TgTable
+from model import G3Result
+from utilities import row_li_to_table, dc_dic_to_table, table_print
 
 
 def cmd_success(upd: Update):
@@ -49,9 +54,9 @@ def cmd_err_key_not_found(upd: Update, obj_ty_descr: str, bkey: str):
     )
 
 
-def cmd_err_setng_miss(upd: Update, ELE_TY: Element):
+def cmd_err_setng_miss(upd: Update, element: Element):
     upd.effective_message.reply_html(
-        f'Command failed! Setting: {ELE_TY.id_} is missing!'
+        f'Command failed! Setting: {element.id_} is missing!'
     )
 
 
@@ -75,10 +80,17 @@ def print_msg(upd: Update, msg: Message):
 
 
 def reply(upd: Update, reply_str: str):
+    # send(upd, reply_str)
     upd.effective_message.reply_html(reply_str)
 
 
-def send_table(upd: Update, tbl_def, row_data, pfx_str: str):
+def send(upd: Update, send_str: str):
+    upd.effective_message.bot.send_message(
+        upd.effective_chat.id,
+        send_str, parse_mode=ParseMode.HTML)
+
+
+def send_table(upd: Update, tbl_def, row_data, pfx_str: str = ''):
     if not pfx_str:
         pfx_str = ''
     if type(row_data) == list:
@@ -90,8 +102,19 @@ def send_table(upd: Update, tbl_def, row_data, pfx_str: str):
     idx_from = 0
     while idx_from < len(tbl.row_li):
         reply_str = pfx_str + f'<code>{table_print(tbl, idx_from, idx_from + step)}</code>'
-        upd.effective_message.reply_html(reply_str)
+        send(upd, reply_str)
+        # upd.effective_message.reply_html(reply_str)
         idx_from = idx_from + step
+
+
+def hdl_retco(upd: Update, logto: logging.Logger, g3r: G3Result):
+    if not g3r or g3r.retco != 0:
+        logto.error(f'retco: {g3r.retco}')
+        cmd_err(upd)
+        return
+
+    cmd_success(upd)
+    return
 
 
 def code(text: str) -> str:

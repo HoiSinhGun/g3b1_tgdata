@@ -8,7 +8,7 @@ from sqlalchemy.engine.mock import MockConnection
 from sqlalchemy.sql import Select
 
 from entities import *
-from g3b1_log.g3b1_log import cfg_logger
+from g3b1_log.log import cfg_logger
 
 logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
 

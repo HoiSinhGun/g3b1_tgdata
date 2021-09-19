@@ -9,7 +9,7 @@ from telegram.ext import CallbackContext, Dispatcher
 from telegram.utils.helpers import DEFAULT_NONE
 from telegram.utils.types import ODVInput, DVInput, JSONDict
 
-from g3b1_log.g3b1_log import cfg_log_tc
+from g3b1_log.log import cfg_log_tc
 from g3b1_serv import utilities
 from subscribe.data import db
 
@@ -46,7 +46,11 @@ class MyMessage(Message):
                    entities: Union[List['MessageEntity'], Tuple['MessageEntity', ...]] = None,
                    quote: bool = None, chat_id=None, parse_mode=None) -> 'Message':
         if MyMessage.msg_callback:
-            MyMessage.msg_callback.add_msg(text)
+            if isinstance(text, int):
+                # Guess why :-)
+                MyMessage.msg_callback.add_msg(str(disable_web_page_preview))
+            else:
+                MyMessage.msg_callback.add_msg(text)
         else:
             logger.info(text)
         return self

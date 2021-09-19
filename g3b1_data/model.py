@@ -84,6 +84,9 @@ class G3Command:
                 return True
         return False
 
+    def dotted(self) -> str:
+        return self.name.replace('_', '.')
+
     def arg_req_ctx(self) -> bool:
         return self.arg_req('ctx')
 

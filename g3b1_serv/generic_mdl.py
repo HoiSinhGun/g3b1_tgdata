@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 
-from g3b1_log.g3b1_log import cfg_logger
+from g3b1_log.log import cfg_logger
 
 logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
@@ -18,6 +18,7 @@ class TgColumn:
     pos: int
     col_name: str
     width: int = -1
+    fix_width = False
     cel_li: list = field(default_factory=list)
 
     @staticmethod

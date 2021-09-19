@@ -2,12 +2,12 @@ import logging
 from pydoc import html
 from typing import Any
 
-from telegram import Update, Message, ParseMode
+from telegram import Update, Message, ParseMode, InlineKeyboardMarkup
 
 from elements import Element
 from generic_mdl import TgTable
 from model import G3Result
-from utilities import row_li_to_table, dc_dic_to_table, table_print
+from utilities import row_li_2_tbl, dc_dic_2_tbl, tbl_2_str
 
 
 def cmd_success(upd: Update):
@@ -79,29 +79,31 @@ def print_msg(upd: Update, msg: Message):
     upd.effective_message.reply_html(reply_string, reply_to_message_id=msg.message_id)
 
 
-def reply(upd: Update, reply_str: str):
+def reply(upd: Update, reply_str: str, reply_markup: InlineKeyboardMarkup = None):
     # send(upd, reply_str)
-    upd.effective_message.reply_html(reply_str)
+    upd.effective_message.reply_html(reply_str, reply_markup=reply_markup,
+                                     timeout=10.0)
 
 
 def send(upd: Update, send_str: str):
     upd.effective_message.bot.send_message(
         upd.effective_chat.id,
-        send_str, parse_mode=ParseMode.HTML)
+        send_str, parse_mode=ParseMode.HTML,
+        timeout=10.0)
 
 
 def send_table(upd: Update, tbl_def, row_data, pfx_str: str = ''):
     if not pfx_str:
         pfx_str = ''
     if type(row_data) == list:
-        tbl: TgTable = row_li_to_table(row_data, tbl_def)
+        tbl: TgTable = row_li_2_tbl(row_data, tbl_def)
     else:
-        tbl: TgTable = dc_dic_to_table(row_data, tbl_def)
+        tbl: TgTable = dc_dic_2_tbl(row_data, tbl_def)
 
-    step = 20
+    step = 10
     idx_from = 0
     while idx_from < len(tbl.row_li):
-        reply_str = pfx_str + f'<code>{table_print(tbl, idx_from, idx_from + step)}</code>'
+        reply_str = pfx_str + f'<code>{tbl_2_str(tbl, idx_from, idx_from + step)}</code>'
         send(upd, reply_str)
         # upd.effective_message.reply_html(reply_str)
         idx_from = idx_from + step
@@ -133,8 +135,10 @@ def send_settings(upd: Update, setng_dct: dict[str, Any]):
     reply_str = '\n'
     k_max, v_max = max_lengths(setng_dct)
     for k, v in setng_dct.items():
-        if k == 'ele_id':
-            v = v['id']
+        if k == 'ele_ty':
+            v = v.id_
+        if not v:
+            v = ''
         reply_str += f'{k.rjust(k_max)} = {str(v).ljust(v_max)}\n'
     reply(upd, code(html.escape(reply_str)))
 

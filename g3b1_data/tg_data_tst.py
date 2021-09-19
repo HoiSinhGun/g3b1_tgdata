@@ -6,7 +6,7 @@ from sqlalchemy.engine import LegacyRow
 from telegram import Message
 
 from g3b1_data import tg_db
-from g3b1_log.g3b1_log import cfg_logger
+from g3b1_log.log import cfg_logger
 
 logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
 

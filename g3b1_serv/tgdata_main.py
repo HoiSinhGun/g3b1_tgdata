@@ -8,7 +8,7 @@ from telegram import Update, ParseMode
 from telegram.ext import CallbackContext, Updater, CommandHandler, MessageHandler, Filters
 
 from entities import EntTy
-from g3b1_log.g3b1_log import cfg_logger
+from g3b1_log.log import cfg_logger
 # This can be your own ID, or one for a developer group/channel.
 # You can use the /start command of this bot to see your chat id.
 from g3b1_serv import utilities
@@ -44,7 +44,7 @@ def error_handler(update: object, context: CallbackContext) -> None:
     )
 
     # Finally, send the message
-    context.bot.send_message(chat_id=DEVELOPER_CHAT_ID, text=message, parse_mode=ParseMode.HTML)
+    # context.bot.send_message(chat_id=DEVELOPER_CHAT_ID, text=message, parse_mode=ParseMode.HTML)
 
 
 def tg_handler():

@@ -12,7 +12,7 @@ import integrity
 from elements import Element
 from entities import EntTy
 from g3b1_data.model import G3Result
-from g3b1_log.g3b1_log import cfg_logger
+from g3b1_log.log import cfg_logger
 
 logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
@@ -70,7 +70,7 @@ def iup_setting(con: MockConnection, meta_data: MetaData, params: dict[str, ...]
     )
     logger.debug(f"InsUpd statement: {insert_stmnt}")
     con.execute(insert_stmnt)
-    return G3Result()
+    return G3Result(0, params)
 
 
 def sel_cu_setng_ref_li(con: MockConnection, meta_data: MetaData, ele_ty: Element, ele_val: int) -> list[

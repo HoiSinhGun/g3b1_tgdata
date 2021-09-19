@@ -1,9 +1,10 @@
 import logging
+from typing import Optional
 
 from sqlalchemy import MetaData, create_engine, func, select
 from sqlalchemy import Table
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.engine import Result
+from sqlalchemy.engine import Result, Row
 from sqlalchemy.engine.mock import MockConnection
 from sqlalchemy.event import listen
 from sqlalchemy.pool import Pool
@@ -13,17 +14,29 @@ from telegram import Message, Chat, User  # noqa
 from g3b1_data.model import G3Result
 from g3b1_data.tg_db_sqlite import tg_db_create_tables
 # create console handler and set level to debug
-from g3b1_log.g3b1_log import cfg_logger
+from g3b1_log.log import cfg_logger
 
 DB_FILE_TG = r'C:\Users\IFLRGU\Documents\dev\g3b1_tg.db'
 MetaData_TG = MetaData()
 Engine_TG = create_engine(f"sqlite:///{DB_FILE_TG}")
 MetaData_TG.reflect(bind=Engine_TG)
 
-logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
+logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
 TABLE_TG_USER = "tg_user"
 TABLE_TG_CHAT = "tg_chat"
+
+
+def fetch_id(con: MockConnection, rs, tbl_name: str) -> Optional[int]:
+    if rs.rowcount != 1:
+        return None
+    rowid = rs.lastrowid
+    if rowid:
+        rs = con.execute(f"SELECT ROWID, * FROM {tbl_name} WHERE ROWID=:rowid", rowid=rowid)
+        id_ = int(rs.first()['id'])
+        return id_
+    else:
+        return None
 
 
 def next_negative_ext_id(chat_id: int, user_id:int) -> G3Result[int]:
@@ -47,7 +60,7 @@ def next_negative_ext_id(chat_id: int, user_id:int) -> G3Result[int]:
         return G3Result(0, ext_id)
 
 
-def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3m_str=''):
+def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3m_str='') -> G3Result[Row]:
     with Engine_TG.connect() as con:
         tg_table: Table = MetaData_TG.tables["tg_message"]
         cols = tg_table.columns

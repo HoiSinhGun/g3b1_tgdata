@@ -6,15 +6,16 @@ from ast import FunctionDef
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Table
 from sqlalchemy.engine import Row
 from sqlalchemy.sql import ColumnElement
 from telegram import Update, Message
 
+from g3b1_cfg.tg_cfg import sel_g3_m
 from g3b1_data import tg_db
+from g3b1_data.model import G3Module, G3Command
 # import subscribe_main
-from generic_mdl import *
-from model import G3Module, g3_m_dct, G3Command, script_by_file_str
+from g3b1_serv.generic_mdl import *
+from g3b1_serv.str_utils import uncapitalize
 
 logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
@@ -34,42 +35,17 @@ def read_function(py_file: str, func_name: str) -> FunctionDef:
     return func_li[0]
 
 
-def read_functions(py_file: str):
-    filename = py_file
-    with open(filename) as file:
-        node = ast.parse(file.read())
-    n: FunctionDef
-
-    func_li = [n for n in node.body if isinstance(n, ast.FunctionDef) and n.name.startswith('cmd_')]
-
-    # for function in func_li:
-    #    print(function.name)
-    return func_li
-
-
-def g3_m_dct_init(g3_m_file: str) -> G3Module:
-    g3_m = G3Module(g3_m_file)
-    cmd_dct = {}
-    hdl: ast.FunctionDef
-    hdl_li = read_functions(g3_m_file)
-    for hdl in hdl_li:
-        script = script_by_file_str(g3_m.file_main)
-        cpl = compile(f"import {g3_m.name}\nfrom {g3_m.name} import {script}\n", "<string>", "exec")
-        exec(cpl)
-        g3_cmd = G3Command(g3_m, eval(f'{g3_m.name}.{script}.{hdl.name}'), hdl.args.args)
-        cmd_dct.update({g3_cmd.name: g3_cmd})
-        logger.debug(g3_cmd)
-    g3_m.cmd_dct = cmd_dct
-    g3_m_dct.update({g3_m.name: g3_m})
-    return g3_m
+def str_uncapitalize(s: str) -> str:
+    return uncapitalize(s)
 
 
 def g3_cmd_by_func(cmd_func) -> G3Command:
-    func_module_str = str(cmd_func.__module__).split(".")[0]
-    if func_module_str.startswith('generic'):
+    split = str(cmd_func.__module__).split(".")
+    func_module_str = split[len(split) - 2]
+    if 'generic_hdl' in split:
         func_module_str = 'generic'
     g3_m_str = func_module_str
-    g3_m: G3Module = g3_m_dct[g3_m_str]
+    g3_m: G3Module = sel_g3_m(g3_m_str)
     prefix: str = f'cmd_'  # {g3_m_str}_'
     len_prefix: int = len(prefix)
     f_name = str(cmd_func.__name__)
@@ -111,9 +87,9 @@ def build_commands_str(commands: dict[str, G3Command], cmd_scope=''):
     return commands_str
 
 
-def sql_rs_2_tbl(row_li: list[Row], tbl: Table) -> TgTable:
+def sql_rs_2_tbl(row_li: list[Row], columns: list[ColumnElement], tbl_name: str) -> TgTable:
+    """Note: Does not work if labels are used. Try repl_dct: dict[ColumnElement, str]"""
     # noinspection PyTypeChecker
-    columns: list[ColumnElement] = tbl.columns
     col_li: list[TgColumn] = [TgColumn(c.key, idx + 1, c.key) for idx, c in enumerate(columns)]
     all_col_width = 0
     for col in col_li:
@@ -143,8 +119,7 @@ def sql_rs_2_tbl(row_li: list[Row], tbl: Table) -> TgTable:
         for col in col_li:
             if col.width > 13:
                 col.width = 13
-
-    tbl_def = TableDef(col_li, tbl.name)
+    tbl_def = TableDef(col_li, tbl_name)
     dict_li: list[dict] = []
     for row in row_li:
         row_dct: dict = {}
@@ -167,7 +142,7 @@ def dc_dic_2_tbl(dc_dic: dict, tbl_def: TableDef) -> TgTable:
 
 
 def row_li_2_tbl(row_li: list[dict], tbl_def: TableDef) -> TgTable:
-    tbl: TgTable = TgTable(tbl_def, col_li=tbl_def.col_li)
+    tbl: TgTable = TgTable(tbl_def, key=tbl_def.key, col_li=tbl_def.col_li)
     # count_col: int = 0
     for count, val_dic in enumerate(row_li):
         row_nr = count + 1

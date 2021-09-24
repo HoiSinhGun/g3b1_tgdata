@@ -5,7 +5,7 @@ from sqlalchemy import MetaData, create_engine, func, select
 from sqlalchemy import Table
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.engine import Result, Row
-from sqlalchemy.engine.mock import MockConnection
+from sqlalchemy.engine import Connection
 from sqlalchemy.event import listen
 from sqlalchemy.pool import Pool
 from sqlalchemy.sql import Select
@@ -27,7 +27,7 @@ TABLE_TG_USER = "tg_user"
 TABLE_TG_CHAT = "tg_chat"
 
 
-def fetch_id(con: MockConnection, rs, tbl_name: str) -> Optional[int]:
+def fetch_id(con: Connection, rs, tbl_name: str) -> Optional[int]:
     if rs.rowcount != 1:
         return None
     rowid = rs.lastrowid
@@ -82,7 +82,7 @@ def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3m_s
         return G3Result(0, result)
 
 
-def synchronize_user(con: MockConnection, row: User):
+def synchronize_user(con: Connection, row: User):
     tg_table: Table = MetaData_TG.tables["tg_user"]
     logger.debug(f"Table: {tg_table}")
     logger.debug(f"Row: {row}")
@@ -97,7 +97,7 @@ def synchronize_user(con: MockConnection, row: User):
     con.execute(tg_insert)
 
 
-def synchronize_chat(con: MockConnection, row: Chat):
+def synchronize_chat(con: Connection, row: Chat):
     tg_table: Table = MetaData_TG.tables["tg_chat"]
     logger.debug(f"Table: {tg_table}")
     logger.debug(f"Row: {row}")
@@ -110,7 +110,7 @@ def synchronize_chat(con: MockConnection, row: Chat):
     con.execute(tg_insert)
 
 
-def synchronize_message(con: MockConnection,
+def synchronize_message(con: Connection,
                         row: Message,
                         g3_cmd_long_str: str = None, is_command_explicit: bool = None):
     tg_table: Table = MetaData_TG.tables["tg_message"]

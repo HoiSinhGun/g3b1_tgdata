@@ -3,14 +3,15 @@ from typing import Callable, Any
 
 from sqlalchemy import MetaData, select
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.engine import Connection
 from sqlalchemy.engine import Result
-from sqlalchemy.engine.mock import MockConnection
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.schema import Table
 
-import integrity
-from elements import Element
-from entities import EntTy
+from g3b1_cfg.tg_cfg import G3Context
+from g3b1_data import integrity
+from g3b1_data.elements import EleTy
+from g3b1_data.entities import EntTy
 from g3b1_data.model import G3Result
 from g3b1_log.log import cfg_logger
 
@@ -18,7 +19,7 @@ logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
 
 def chat_setting(
-        chat_id: int, ele_ty: Element, ele_val: str = None) -> dict[str, ...]:
+        chat_id: int, ele_ty: EleTy, ele_val: str = None) -> dict[str, ...]:
     """Prepare arg dictionary for a setting for the chat_id
     to read or write"""
     params = dict(chat_id=chat_id, colname=ele_ty.col_name, ele_ty=ele_ty)
@@ -28,7 +29,7 @@ def chat_setting(
 
 
 def user_setting(
-        user_id: int, ele_ty: Element, ele_val: str = None) -> dict[str, ...]:
+        user_id: int, ele_ty: EleTy, ele_val: str = None) -> dict[str, ...]:
     """Prepare arg dictionary for a setting for the user_id
     to read or write"""
     params = dict(user_id=user_id, colname=ele_ty.col_name)
@@ -37,7 +38,7 @@ def user_setting(
     return params
 
 
-def chat_user_setting(chat_id: int, user_id: int, ele_ty: Element, ele_val: str = None) -> dict[str,]:
+def chat_user_setting(chat_id: int, user_id: int, ele_ty: EleTy, ele_val: str = None) -> dict[str,]:
     """Prepare arg dictionary for a setting for the chat_id/user_id
         to read or write"""
     params = dict(chat_id=chat_id, user_id=user_id, ele_ty=ele_ty)
@@ -46,7 +47,38 @@ def chat_user_setting(chat_id: int, user_id: int, ele_ty: Element, ele_val: str 
     return params
 
 
-def iup_setting(con: MockConnection, meta_data: MetaData, params: dict[str, ...]) -> G3Result:
+def ins_init_setng():
+    con: Connection
+    user_id = G3Context.upd.effective_user.id
+    chat_id = G3Context.upd.effective_chat.id
+
+    with G3Context.eng.begin() as con:
+        ext_tg_chat: Table = G3Context.md.tables['ext_tg_chat']
+        values = dict(id=chat_id)
+        ext_insert: insert = insert(ext_tg_chat).values(values).on_conflict_do_update(
+            index_elements=['id'],
+            set_=values
+        )
+        con.execute(ext_insert)
+
+        ext_tg_user: Table = G3Context.md.tables['ext_tg_user']
+        values = dict(id=user_id)
+        ext_insert: insert = insert(ext_tg_user).values(values).on_conflict_do_update(
+            index_elements=['id'],
+            set_=values
+        )
+        con.execute(ext_insert)
+
+        tbl: Table = G3Context.md.tables['user_chat_settings']
+        values = {'tg_user_id': user_id, 'tg_chat_id': chat_id}
+        ins_stmnt: insert = insert(tbl).values(values).on_conflict_do_update(
+            index_elements=values.keys(),
+            set_=values
+        )
+        con.execute(ins_stmnt)
+
+
+def iup_setting(con: Connection, meta_data: MetaData, params: dict[str, ...]) -> G3Result:
     is_chat, is_user, tbl_name, tg_chat_id, tg_user_id = chat_user_setng_params(params)
     values: dict = {}
     index_elements: list = []
@@ -57,7 +89,7 @@ def iup_setting(con: MockConnection, meta_data: MetaData, params: dict[str, ...]
         values['tg_chat_id'] = tg_chat_id
         index_elements.append('tg_chat_id')
     if 'ele_ty' in params.keys():
-        ele_ty: Element = params['ele_ty']
+        ele_ty: EleTy = params['ele_ty']
         if 'ele_val' not in params or params['ele_val'] == 'None':
             values[ele_ty.col_name] = None
         else:
@@ -73,7 +105,7 @@ def iup_setting(con: MockConnection, meta_data: MetaData, params: dict[str, ...]
     return G3Result(0, params)
 
 
-def sel_cu_setng_ref_li(con: MockConnection, meta_data: MetaData, ele_ty: Element, ele_val: int) -> list[
+def sel_cu_setng_ref_li(con: Connection, meta_data: MetaData, ele_ty: EleTy, ele_val: int) -> list[
     dict[str, ...]]:
     refs_li = []
     tbl_settings: Table = meta_data.tables['user_chat_settings']
@@ -96,11 +128,11 @@ def ent_to_setng(ch_us_tup: tuple[int, int], ent: Any) -> G3Result:
     with engine.begin() as con:
         g3r = iup_setting(con, meta, chat_user_setting(
             ch_us_tup[0], ch_us_tup[1],
-            Element.by_ent_ty(ent_ty), ent.id_))
+            EleTy.by_ent_ty(ent_ty), ent.id_))
         return g3r
 
 
-def ent_by_setng(ch_us_tup: tuple[int, int], ele_ty: Element, sel_cb: Callable) -> G3Result:
+def ent_by_setng(ch_us_tup: tuple[int, int], ele_ty: EleTy, sel_cb: Callable = None) -> G3Result:
     ent_ty: EntTy = ele_ty.ent_ty
     meta = integrity.meta_by_ent_ty(ent_ty)
     engine = integrity.engine_by_ent_ty(ent_ty)
@@ -108,11 +140,13 @@ def ent_by_setng(ch_us_tup: tuple[int, int], ele_ty: Element, sel_cb: Callable) 
         g3r = read_setting(con, meta, chat_user_setting(ch_us_tup[0], ch_us_tup[1], ele_ty))
         if g3r.retco != 0:
             return g3r
+        if sel_cb:
+            return sel_cb(g3r.result)
+        else:
+            return g3r
 
-        return sel_cb(g3r.result)
 
-
-def read_setting(con: MockConnection, meta_data: MetaData, params: dict[str, ...]) -> G3Result:
+def read_setting(con: Connection, meta_data: MetaData, params: dict[str, ...]) -> G3Result:
     is_chat, is_user, tbl_name, tg_chat_id, tg_user_id = chat_user_setng_params(params)
 
     tbl_settings: Table = meta_data.tables[tbl_name]

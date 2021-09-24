@@ -4,10 +4,12 @@ from typing import Any
 
 from telegram import Update, Message, ParseMode, InlineKeyboardMarkup
 
-from elements import Element
-from generic_mdl import TgTable
-from model import G3Result
-from utilities import row_li_2_tbl, dc_dic_2_tbl, tbl_2_str
+from g3b1_data.elements import EleTy
+from g3b1_data.model import G3Result
+from g3b1_serv.generic_mdl import TgTable
+from g3b1_serv.utilities import row_li_2_tbl, dc_dic_2_tbl, tbl_2_str
+
+TIMEOUT = 30.0
 
 
 def cmd_success(upd: Update):
@@ -54,7 +56,7 @@ def cmd_err_key_not_found(upd: Update, obj_ty_descr: str, bkey: str):
     )
 
 
-def cmd_err_setng_miss(upd: Update, element: Element):
+def cmd_err_setng_miss(upd: Update, element: EleTy):
     upd.effective_message.reply_html(
         f'Command failed! Setting: {element.id_} is missing!'
     )
@@ -82,14 +84,21 @@ def print_msg(upd: Update, msg: Message):
 def reply(upd: Update, reply_str: str, reply_markup: InlineKeyboardMarkup = None):
     # send(upd, reply_str)
     upd.effective_message.reply_html(reply_str, reply_markup=reply_markup,
-                                     timeout=10.0)
+                                     timeout=TIMEOUT)
 
 
-def send(upd: Update, send_str: str):
+def li_send(upd: Update, send_li: list[str], reply_markup: InlineKeyboardMarkup = None):
+    # send(upd, reply_str)
+    for send_str in send_li:
+        send(upd, send_str)
+
+
+def send(upd: Update, send_str: str, reply_markup=None):
     upd.effective_message.bot.send_message(
         upd.effective_chat.id,
         send_str, parse_mode=ParseMode.HTML,
-        timeout=10.0)
+        reply_markup=reply_markup,
+        timeout=TIMEOUT)
 
 
 def send_table(upd: Update, tbl_def, row_data, pfx_str: str = ''):
@@ -148,7 +157,7 @@ def max_lengths(kv_dct: dict) -> (int, int):
     v_max: int = 0
     for k, v in kv_dct.items():
         if k == 'ele_id':
-            v = v['id']
+            v = v['id_']
         if len(k) > k_max:
             k_max = len(k)
         v_len = 20

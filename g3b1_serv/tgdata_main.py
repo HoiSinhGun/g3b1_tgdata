@@ -1,20 +1,28 @@
-import functools
+import importlib
 import json
 import logging
 import traceback
 from pydoc import html
+from typing import Callable
 
-from telegram import Update, ParseMode
-from telegram.ext import CallbackContext, Updater, CommandHandler, MessageHandler, Filters
+from sqlalchemy import MetaData
+from sqlalchemy.engine import Engine
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import CallbackContext, Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
-from entities import EntTy
+from g3b1_cfg.tg_cfg import G3Context, init_g3_m
+from g3b1_cfg.tg_cfg import sel_g3_m
+from g3b1_data import settings
+from g3b1_data.entities import EntTy
+from g3b1_data.model import G3Command, G3Module
+from g3b1_data.tg_db_sqlite import tg_db_create_tables
 from g3b1_log.log import cfg_logger
 # This can be your own ID, or one for a developer group/channel.
 # You can use the /start command of this bot to see your chat id.
-from g3b1_serv import utilities
-from model import *
+from g3b1_serv import utilities, tg_reply, generic_hdl
+from g3b1_ui.model import TgUIC
 from subscribe.data import db
-from tg_db_sqlite import tg_db_create_tables
+from subscribe.serv import services as sub_services
 
 DEVELOPER_CHAT_ID = -579559871
 
@@ -35,6 +43,7 @@ def error_handler(update: object, context: CallbackContext) -> None:
     # You might need to add some logic to deal with messages longer than the 4096 character limit.
     update_str = update.to_dict() if isinstance(update, Update) else str(update)
     escaped_error_text = html.escape(tb_string[: 3357])
+    # noinspection PyUnusedLocal
     message = (
         f'<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}'
         '\n\n'
@@ -47,115 +56,23 @@ def error_handler(update: object, context: CallbackContext) -> None:
     # context.bot.send_message(chat_id=DEVELOPER_CHAT_ID, text=message, parse_mode=ParseMode.HTML)
 
 
-def tg_handler():
-    def decorator_handler(cmd_func):
-        @functools.wraps(cmd_func)
-        def wrapper_handler(*arg, **kwargs):
-            """arg should have 2 entries only: upd and ctx
-            upd contains user_id and chat_id *required by many handlers, passed depending on funcdef*
-            kwargs contains additional hdl specific parameters found.
-            Their values are found in ctx.args as well if called from TG API
-              """
-            upd: Update = arg[0]
-            ctx_args = []
-            # ctx: CallbackContext = None
-            # if len(arg) > 1:
-            ctx: CallbackContext = arg[1]
-            if ctx and ctx.args:
-                ctx_args = ctx.args
-
-            g3_cmd: G3Command = utilities.g3_cmd_by_func(cmd_func)
-            # noinspection PyTypeChecker
-            ent_ty: EntTy = None
-            if g3_cmd.arg_req_ent_ty():
-                # args extraction for generic commands
-                ent_ty = kwargs['ent_ty']
-                kwargs.pop('ent_ty')
-
-            # Have kwargs been passed by the caller and are missing in ctx.args?
-            # Then we rebuild ctx.args from kwargs
-            # Simple g3b1_test, i.e. no analysis of possible mismatches
-            # A handler method can therefore be called by populating kwargs or ctx.args (in the right order)
-            if len(kwargs) > 0 and len(kwargs) > len(ctx_args):
-                ctx_args.clear()
-                for kw in kwargs:
-                    if len(kwargs) == 1:
-                        """This makes no sense, maybe we pass title = 'hello world' and 
-                        have then len(ctx.args) == 2 Why should we want this?
-                        And the other way around is missing, isn't it?
-                        Aha! Check the join part below. Parsing single title alike args with possible spaces 
-                        """
-                        split_li = str(kwargs[kw]).split(' ')
-                        ctx_args.extend(split_li)
-                    else:
-                        ctx_args.append(kwargs[kw])
-            # At this point kwargs could be cleared to ensure
-            # same state, no matter where we come from (testcase, TG, click cmd)
-
-            idx_last_ctx_arg = len(ctx_args) - 1
-            cmd_arg_li = g3_cmd.extra_args()  # skipping upd, chat_id, user_id
-            for idx, item in enumerate(cmd_arg_li):
-                if idx <= idx_last_ctx_arg:
-                    if len(cmd_arg_li) == 1:
-                        # A title like argument with spaces will be split into several args by PTB
-                        kwargs.update({item.arg: ' '.join(ctx_args)})
-                    else:
-                        kwargs.update({item.arg: ctx_args[idx]})
-                else:
-                    kwargs.update({item.arg: None})
-
-            new_arg_li = [upd]
-            chat_id = upd.effective_chat.id
-            user_id = upd.effective_user.id
-            reply_to_msg = upd.effective_message.reply_to_message
-            if g3_cmd.arg_req_ctx():
-                new_arg_li.append(ctx)
-            if g3_cmd.arg_req_reply_to_msg() or g3_cmd.arg_req_src_msg():
-                if g3_cmd.arg_req_reply_to_msg():
-                    new_arg_li.append(reply_to_msg)
-                if g3_cmd.arg_req_src_msg():
-                    src_msg = None
-                    if reply_to_msg:
-                        src_msg = reply_to_msg
-                    else:
-                        if utilities.is_msg_w_cmd(upd.effective_message.text):
-                            # src_msg is the message assumed to be the input for the command
-                            # if no msg has been replied to
-                            # it can not be safely guessed to be the latest chat-message
-                            src_msg = utilities.read_latest_message(chat_id, user_id)
-                    new_arg_li.append(src_msg)
-            if g3_cmd.arg_req_reply_to_user_id():
-                if reply_to_msg:
-                    from_user_id = reply_to_msg.from_user.id
-                else:
-                    from_user_id = None
-                new_arg_li.append(from_user_id)
-            if g3_cmd.arg_req_chat():
-                new_arg_li.append(chat_id)
-            if g3_cmd.arg_req_user():
-                new_arg_li.append(user_id)
-            if g3_cmd.arg_req_ent_ty():
-                new_arg_li.append(ent_ty)
-            output = cmd_func(*new_arg_li, **kwargs)
-            return output
-
-        return wrapper_handler
-
-    return decorator_handler
-
-
 def start(upd: Update, ctx: CallbackContext) -> None:
-    """Displays info on how to trigger an error."""
+    """Start menu and bot for user activation"""
+    G3Context.upd = upd
+
     # @g3b1_todo_bot -> todo
     g3_m_str = upd.effective_message.bot.username.split("_")[1]
     if g3_m_str == 'translate':
         g3_m_str = 'trans'
 
+    settings.ins_init_setng()
+    sub_services.bot_activate(g3_m_str)
+
     cmd_scope = ''
     if ctx and ctx.args and len(ctx.args) > 0:
         cmd_scope = ctx.args[0]
 
-    commands_str = utilities.build_commands_str(utilities.g3_m_dct[g3_m_str].cmd_dct, cmd_scope)
+    commands_str = utilities.build_commands_str(sel_g3_m(g3_m_str).cmd_dct, cmd_scope)
     upd.effective_message.reply_html(
         commands_str +
         utilities.build_debug_str(upd)
@@ -167,12 +84,83 @@ def hdl_message(upd: Update, ctx: CallbackContext) -> None:
     pass
 
 
+@generic_hdl.tg_handler()
+def bot(g3_m_str: str, cmd_prefix: str, uname: str) -> None:
+    """If given as 1st arg sets the current bot. Otherwise sends a message with inline buttons to select the bot
+     If given as 2nd arg sets the cmd_prefix. Otherwise resets the cmd_prefix to empty.
+     IF given as 3rd arg the setting will be done for the specified user"""
+    if g3_m_str:
+        sub_services.iup_setng_cmd_prefix(uname=uname, cmd_prefix=cmd_prefix, g3_m_str=g3_m_str)
+        return
+
+    keyboard = [
+        [
+            InlineKeyboardButton("Translate", callback_data='bot:trans'),
+            InlineKeyboardButton("Money", callback_data='bot:money'),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    TgUIC.uic.send('Please choose:', reply_markup=reply_markup)
+
+
+def query_answer(upd: Update, ctx: CallbackContext) -> None:
+    """Parses the CallbackQuery and updates the message text."""
+    G3Context.upd = upd
+    query = upd.callback_query
+    qd_split = query.data.split(':', 1)
+    g3_m_str = qd_split[0]
+    mi_id = qd_split[1]
+    g3_m: G3Module = sel_g3_m(g3_m_str)
+    sub_services.iup_setng_cmd_prefix(cmd_prefix=mi_id, g3_m_str=g3_m_str)
+
+    if mi_id in g3_m.cmd_dct.keys():
+        g3_cmd: G3Command = g3_m.cmd_dct[mi_id]
+        sub_services.iup_setng_cmd_default(g3_cmd)
+    else:
+        sub_services.iup_setng_cmd_default()
+
+    query.answer()
+    if mi_id.endswith('33'):
+        # list
+        ent_str = mi_id[:-3]
+        ent_ty = EntTy.by_id(ent_str)
+        if ent_ty:
+            # Generic list command on entity of type ent_ty
+            generic_hdl.cmd_ent_ty_33_li(upd, ctx, ent_ty=ent_ty)
+            return
+
+    module = importlib.import_module(f'{g3_m_str}.tg_hdl')
+    cmd_menu_func = getattr(module, 'cmd_menu')
+    ctx.args = [mi_id]
+    cmd_menu_func(upd, ctx)
+    # CallbackQueries need to be answered, even if no notification to the user is needed
+    # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
+
+
+def go2(upd: Update):
+    """
+    Start function. Displayed whenever the /start command is called.
+    This function sets the language of the bot.
+    """
+    keyboard = [['<<', '😶', '🤔', '>>'],
+                ['❗', '❓', '🔐']]
+    message = "Choose an option!"
+
+    reply_markup = ReplyKeyboardMarkup(keyboard,
+                                       one_time_keyboard=True,
+                                       resize_keyboard=True)
+    tg_reply.send(upd, message, reply_markup=reply_markup)
+
+
 def start_bot(file: str,
+              eng: Engine, md: MetaData,
               hdl_for_message: Callable = hdl_message):
     # ,  hdl_for_start: callable = start, hdl_for_message: callable = hdl_message):
     """Run the bot."""
+    G3Context.eng = eng
+    G3Context.md = md
     bot_li: dict[str, dict] = db.bot_all()
-    g3_m: G3Module = utilities.g3_m_dct_init(file)
+    g3_m: G3Module = init_g3_m(file)
     cmd_dct: dict = g3_m.cmd_dct
 
     bot_dict: dict = bot_li[g3_m.name]
@@ -186,6 +174,11 @@ def start_bot(file: str,
 
     # Register the commands...
 
+    # noinspection PyTypeChecker
+    dispatcher.add_handler(CommandHandler('bot', bot))
+    dispatcher.add_handler(CommandHandler('go2', go2))
+    # noinspection PyTypeChecker
+    dispatcher.add_handler(CallbackQueryHandler(query_answer))
     dispatcher.add_handler(MessageHandler(
         Filters.text & ~Filters.command, hdl_for_message))
     dispatcher.add_handler(CommandHandler('start', start))

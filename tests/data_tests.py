@@ -1,9 +1,11 @@
 # Standard import
+import importlib
 import unittest
 
-from entities import ENT_TY_tst_tplate
-from g3b1_serv.utilities import *
+from g3b1_data.entities import ENT_TY_tst_tplate
 from trans.data.model import TstTplate_, Lc
+
+from g3b1_serv.utilities import *
 
 
 class SettingsTestCase(unittest.TestCase):

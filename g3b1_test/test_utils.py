@@ -9,6 +9,7 @@ from telegram.ext import CallbackContext, Dispatcher
 from telegram.utils.helpers import DEFAULT_NONE
 from telegram.utils.types import ODVInput, DVInput, JSONDict
 
+from g3b1_cfg.tg_cfg import init_g3_m
 from g3b1_log.log import cfg_log_tc
 from g3b1_serv import utilities
 from subscribe.data import db
@@ -51,6 +52,16 @@ class MyMessage(Message):
                 MyMessage.msg_callback.add_msg(str(disable_web_page_preview))
             else:
                 MyMessage.msg_callback.add_msg(text)
+            if reply_markup:
+                # noinspection PyTypeChecker
+                keyboard: list[list[dict[str, str]]] = reply_markup['keyboard']
+                for row in keyboard:
+                    # print(' '.join([i['text'] for i in row]))
+                    for text in [i['text'] for i in row]:
+                        print(text)
+                for idx_row, row in enumerate(keyboard):
+                    print(' '.join([f'{idx_row}{idx}{i["text"]}' for idx, i in enumerate(row)]))
+
         else:
             logger.info(text)
         return self
@@ -154,7 +165,7 @@ def upd_builder(message_id: int = -333, chat=Chat(1, constants.CHAT_GROUP),
 
 
 def setup(file: str) -> Dispatcher:
-    g3_m = utilities.g3_m_dct_init(file)
+    g3_m = init_g3_m(file)
     bot_row = db.bot_all()[g3_m.name]
     bot = Bot(bot_row['token'])
     bot._bot = User(-666, 'bot', True, username=f'g3b1_{bot_row["bkey"]}')

@@ -47,9 +47,18 @@ def chat_user_setting(chat_id: int, user_id: int, ele_ty: EleTy, ele_val: str = 
     return params
 
 
+def cu_setng(ele_ty: EleTy, ele_val: str = None) -> dict[str,]:
+    """Prepare arg dictionary for a setting for the chat_id/user_id
+        to read or write"""
+    params = dict(chat_id=G3Context.chat_id(), user_id=G3Context.for_user_id(), ele_ty=ele_ty)
+    if ele_val is not None:
+        params['ele_val'] = str(ele_val)
+    return params
+
+
 def ins_init_setng():
     con: Connection
-    user_id = G3Context.upd.effective_user.id
+    user_id = G3Context.for_user_id()
     chat_id = G3Context.upd.effective_chat.id
 
     with G3Context.eng.begin() as con:
@@ -121,19 +130,22 @@ def sel_cu_setng_ref_li(con: Connection, meta_data: MetaData, ele_ty: EleTy, ele
     return refs_li
 
 
-def ent_to_setng(ch_us_tup: tuple[int, int], ent: Any) -> G3Result:
+def ent_to_setng(ch_us_tup: tuple[int, int], ent: Any, ele_ty: EleTy = None) -> G3Result:
     ent_ty: EntTy = ent.ent_ty()
+    if not ele_ty:
+        ele_ty = EleTy.by_ent_ty(ent_ty)
     meta = integrity.meta_by_ent_ty(ent_ty)
     engine = integrity.engine_by_ent_ty(ent_ty)
     with engine.begin() as con:
         g3r = iup_setting(con, meta, chat_user_setting(
             ch_us_tup[0], ch_us_tup[1],
-            EleTy.by_ent_ty(ent_ty), ent.id_))
+            ele_ty, ent.id_))
         return g3r
 
 
-def ent_by_setng(ch_us_tup: tuple[int, int], ele_ty: EleTy, sel_cb: Callable = None) -> G3Result:
-    ent_ty: EntTy = ele_ty.ent_ty
+def ent_by_setng(ch_us_tup: tuple[int, int], ele_ty: EleTy, sel_cb: Callable = None, ent_ty: EntTy = None) -> G3Result:
+    if not ent_ty:
+        ent_ty: EntTy = ele_ty.ent_ty
     meta = integrity.meta_by_ent_ty(ent_ty)
     engine = integrity.engine_by_ent_ty(ent_ty)
     with engine.begin() as con:

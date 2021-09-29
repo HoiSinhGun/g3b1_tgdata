@@ -10,11 +10,33 @@ from telegram.ext import CallbackContext
 from g3b1_cfg.tg_cfg import G3Context
 from g3b1_cfg.tg_cfg import ins_g3_m, sel_g3_m
 from g3b1_data import settings
+from g3b1_data.elements import ELE_TY_user_id, ELE_TY_su__user_id, ELE_TY_out__chat_id
 from g3b1_data.entities import EntTy, EntId
 from g3b1_data.model import G3Command, G3Module, g3m_str_by_file_str, MenuIt, G3Arg
 from g3b1_serv import utilities
+from g3b1_serv.tg_reply import bold
 from g3b1_serv.utilities import upd_extract_chat_user_id, sql_rs_2_tbl
 from g3b1_ui.model import TgUIC
+from subscribe.data.db import eng_SUB, md_SUB
+from subscribe.serv import services as sub_services
+
+
+def init_g3_ctx(upd: Update, ctx: CallbackContext):
+    G3Context.upd = upd
+    G3Context.ctx = ctx
+    G3Context.g3_cmd = None
+    G3Context.g3_m_str = None
+    setng = settings.cu_setng(ELE_TY_su__user_id)
+    setng['user_id'] = G3Context.user_id()
+    G3Context.su__user_id = settings.read_setting(eng_SUB, md_SUB, setng).result
+    setng['ele_ty'] = ELE_TY_out__chat_id
+    G3Context.out__chat_id = settings.read_setting(eng_SUB, md_SUB, setng).result
+    TgUIC.uic = TgUIC(upd)
+    g3_m_str = ctx.bot.username.split('_')[1]
+    if g3_m_str == 'translate':
+        g3_m_str = 'trans'
+
+    G3Context.g3_m_str = g3_m_str
 
 
 def tg_handler():
@@ -27,16 +49,13 @@ def tg_handler():
             Their values are found in ctx.args as well if called from TG API
               """
             upd: Update = arg[0]
-            G3Context.upd = upd
-            G3Context.g3_cmd = None
-            G3Context.g3_m_str = None
-            TgUIC.uic = TgUIC(upd)
             ctx_args = []
             # ctx: CallbackContext = None
             # if len(arg) > 1:
             ctx: CallbackContext = arg[1]
             if ctx and ctx.args:
                 ctx_args = ctx.args
+            init_g3_ctx(upd, ctx)
 
             g3_cmd: G3Command = utilities.g3_cmd_by_func(cmd_func)
             G3Context.g3_cmd = g3_cmd
@@ -44,7 +63,7 @@ def tg_handler():
 
             # noinspection PyTypeChecker
             ent_ty: EntTy = None
-            if g3_cmd.arg_req_ent_ty():
+            if g3_cmd.has_arg_ent_ty():
                 # args extraction for generic commands
                 ent_ty = kwargs['ent_ty']
                 kwargs.pop('ent_ty')
@@ -70,14 +89,27 @@ def tg_handler():
             # same state, no matter where we come from (testcase, TG, click cmd)
 
             idx_last_ctx_arg = len(ctx_args) - 1
-            cmd_arg_li = g3_cmd.extra_args()  # skipping upd, chat_id, user_id and more
+            cmd_arg_li = [i for i in g3_cmd.extra_args() if
+                          (i.f_current == False)]  # skipping upd, chat_id, user_id and more
             for idx, item in enumerate(cmd_arg_li):
                 if idx <= idx_last_ctx_arg:
-                    if len(cmd_arg_li) == 1:
-                        # A title like argument with spaces will be split into several args by PTB
-                        kwargs.update({item.arg: ' '.join(ctx_args)})
+                    # if len(cmd_arg_li) == 1 and len(ctx_args):
+                    #     # A title like argument with spaces will be split into several args by PTB
+                    #     kwargs.update({item.arg: ' '.join(ctx_args)})
+                    # else:
+                    if idx == len(cmd_arg_li) - 1:
+                        arg_val = ' '.join(ctx_args[idx:])
                     else:
-                        kwargs.update({item.arg: ctx_args[idx]})
+                        arg_val = ctx_args[idx]
+                    if item.arg == 'uname' and arg_val and len(arg_val) < 6:
+                        arg_val = 'g3b1_' + arg_val
+                    if item.arg == 'req__user_id':
+                        req__user_id = sub_services.id_by_uname(arg_val)
+                        if not req__user_id:
+                            TgUIC.uic.err_p_404(arg_val, ELE_TY_user_id)
+                            return
+                        arg_val = req__user_id
+                    kwargs.update({item.arg: arg_val})
                 else:
                     kwargs.update({item.arg: None})
             ent_ty_arg_li = g3_cmd.ent_ty_args()
@@ -87,26 +119,32 @@ def tg_handler():
                 sel_ent_ty = getattr(modu_db, 'sel_ent_ty', 'NULL')
                 for g3_arg in ent_ty_arg_li:
                     if g3_arg.f_current:
-                        ent_r_id = settings.ent_by_setng(upd_extract_chat_user_id(upd), g3_arg.ele_ty).result
+                        ent_r_id = settings.ent_by_setng(upd_extract_chat_user_id(), g3_arg.ele_ty,
+                                                         ent_ty=g3_arg.ent_ty).result
                     elif g3_arg.f_required:
                         ent_r_id = kwargs[g3_arg.arg]
+                        if ent_r_id and str(ent_r_id).isnumeric():
+                            ent_r_id = int(ent_r_id)
                     else:
                         ent_r_id = 0
-                    ent_r = sel_ent_ty(EntId(g3_arg.ent_ty, ent_r_id)).result
-                    kwargs.update({g3_arg.arg: ent_r})
+                    if isinstance(ent_r_id, int) and ent_r_id:
+                        ent_r = sel_ent_ty(EntId(g3_arg.ent_ty, ent_r_id)).result
+                        kwargs.update({g3_arg.arg: ent_r})
+                    else:
+                        kwargs.update({g3_arg.arg: None})
 
             new_arg_li = []
             chat_id = upd.effective_chat.id
             user_id = upd.effective_user.id
             reply_to_msg = upd.effective_message.reply_to_message
-            if g3_cmd.arg_req_upd():
+            if g3_cmd.has_arg_upd():
                 new_arg_li.append(upd)
-            if g3_cmd.arg_req_ctx():
+            if g3_cmd.has_arg_ctx():
                 new_arg_li.append(ctx)
-            if g3_cmd.arg_req_reply_to_msg() or g3_cmd.arg_req_src_msg():
-                if g3_cmd.arg_req_reply_to_msg():
+            if g3_cmd.has_arg_reply_to_msg() or g3_cmd.has_arg_src_msg():
+                if g3_cmd.has_arg_reply_to_msg():
                     new_arg_li.append(reply_to_msg)
-                if g3_cmd.arg_req_src_msg():
+                if g3_cmd.has_arg_src_msg():
                     src_msg = None
                     if reply_to_msg:
                         src_msg = reply_to_msg
@@ -117,24 +155,24 @@ def tg_handler():
                             # it can not be safely guessed to be the latest chat-message
                             src_msg = utilities.read_latest_message(chat_id, user_id)
                     new_arg_li.append(src_msg)
-            if g3_cmd.arg_req_reply_to_user_id():
+            if g3_cmd.has_arg_reply_to_user_id():
                 if reply_to_msg:
                     from_user_id = reply_to_msg.from_user.id
                 else:
                     from_user_id = None
                 new_arg_li.append(from_user_id)
-            if g3_cmd.arg_req_chat():
+            if g3_cmd.has_arg_chat():
                 new_arg_li.append(chat_id)
-            if g3_cmd.arg_req_user():
+            if g3_cmd.has_arg_user():
                 new_arg_li.append(user_id)
-            if g3_cmd.arg_req_ent_ty():
+            if g3_cmd.has_arg_ent_ty():
                 new_arg_li.append(ent_ty)
 
             output = cmd_func(*new_arg_li, **kwargs)
-            if g3_cmd.is_ins_ent() or g3_cmd.is_pick_ent():
+            if (g3_cmd.is_ins_ent() or g3_cmd.is_pick_ent()) and output:
                 settings.ent_to_setng(
-                    upd_extract_chat_user_id(upd), output)
-            G3Context.upd = None
+                    upd_extract_chat_user_id(), output)
+            G3Context.reset()
             return output
 
         return wrapper_handler
@@ -144,7 +182,7 @@ def tg_handler():
 
 @tg_handler()
 def cmd_ent_ty_33_li(upd: Update, ent_ty: EntTy):
-    chat_id, user_id = upd_extract_chat_user_id(upd)
+    chat_id, user_id = upd_extract_chat_user_id()
     md: MetaData = getattr(
         importlib.import_module(f'{ent_ty.g3_m_str}.data'), f'md_{ent_ty.g3_m_str.upper()}'
     )
@@ -166,7 +204,10 @@ def cmd_ent_ty_33_li(upd: Update, ent_ty: EntTy):
     # noinspection PyTypeChecker
     col_li = [col for col in tbl.columns if col.key != 'chat_id']
     tg_tbl = sql_rs_2_tbl(row_li, col_li, tbl.name)
-    TgUIC.uic.send_tg_tbl(tg_tbl)
+    if row_li:
+        TgUIC.uic.send_tg_tbl(tg_tbl)
+    else:
+        TgUIC.uic.no_data()
     # ele_mebrs_tup_li = utilities.extract_ele_members(ent_type)
     #
     # ent_r_li: list = []
@@ -231,13 +272,24 @@ def send_ent_ty_keyboard(ent_ty: EntTy):
 
 def send_menu_keyboard(root_str: str, mi_li: list[MenuIt]):
     keyboard = []
+    kb_row = []
     for mi in mi_li:
-        keyboard.append(InlineKeyboardButton(mi.lbl, callback_data=f'{mi.menu.id}:{mi.id}'))
+        if mi.lbl == '\n':
+            keyboard.append(kb_row)
+            kb_row = []
+            continue
+        menu_id = ''
+        if mi.menu:
+            menu_id = mi.menu.id + ':'
+        elif mi.g3_cmd:
+            menu_id = mi.g3_cmd.g3_m.name + ':'
+        kb_row.append(InlineKeyboardButton(mi.lbl_w_icon(), callback_data=f'{menu_id}{mi.id}'))
+    keyboard.append(kb_row)
 
     # ReplyKeyboardMarkup
-    reply_markup = InlineKeyboardMarkup([keyboard])
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    send_str = f'Choose a menu item for {root_str}'
+    send_str = f'Choose a menu item for {bold(root_str)}'
     TgUIC.uic.send(send_str, reply_markup)
 
 

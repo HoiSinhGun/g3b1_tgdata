@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy import MetaData, create_engine, func, select
 from sqlalchemy import Table
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.engine import Result, Row
+from sqlalchemy.engine import Result, Row, CursorResult
 from sqlalchemy.engine import Connection
 from sqlalchemy.event import listen
 from sqlalchemy.pool import Pool
@@ -32,7 +32,7 @@ def fetch_id(con: Connection, rs, tbl_name: str) -> Optional[int]:
         return None
     rowid = rs.lastrowid
     if rowid:
-        rs = con.execute(f"SELECT ROWID, * FROM {tbl_name} WHERE ROWID=:rowid", rowid=rowid)
+        rs: CursorResult = con.execute(f"SELECT ROWID, * FROM {tbl_name} WHERE ROWID=:rowid", rowid=rowid)
         id_ = int(rs.first()['id'])
         return id_
     else:

@@ -78,7 +78,7 @@ class G3Command:
     def ent_ty_args(self) -> list["G3Arg"]:
         return [arg for arg in self.g3_arg_li if arg.ent_ty is not None]
 
-    def arg_req(self, arg_name: str) -> bool:
+    def has_arg(self, arg_name: str) -> bool:
         for item in self.g3_arg_li:
             if item.arg == arg_name:
                 return True
@@ -87,35 +87,36 @@ class G3Command:
     def dotted(self) -> str:
         return self.name.replace('_', '.')
 
-    def arg_req_upd(self) -> bool:
-        return self.arg_req('upd')
+    def has_arg_upd(self) -> bool:
+        return self.has_arg('upd')
 
-    def arg_req_ctx(self) -> bool:
-        return self.arg_req('ctx')
+    def has_arg_ctx(self) -> bool:
+        return self.has_arg('ctx')
 
-    def arg_req_user(self) -> bool:
-        return self.arg_req('user_id')
+    def has_arg_user(self) -> bool:
+        return self.has_arg('user_id')
 
-    def arg_req_ent_ty(self) -> bool:
-        return self.arg_req('ent_ty')
+    def has_arg_ent_ty(self) -> bool:
+        return self.has_arg('ent_ty')
 
-    def arg_req_chat(self) -> bool:
-        return self.arg_req('chat_id')
+    def has_arg_chat(self) -> bool:
+        return self.has_arg('chat_id')
 
-    def arg_req_reply_to_msg(self) -> bool:
-        return self.arg_req('reply_to_msg')
+    def has_arg_reply_to_msg(self) -> bool:
+        return self.has_arg('reply_to_msg')
 
-    def arg_req_src_msg(self) -> bool:
-        return self.arg_req('src_msg')
+    def has_arg_src_msg(self) -> bool:
+        return self.has_arg('src_msg')
 
-    def arg_req_reply_to_user_id(self) -> bool:
-        return self.arg_req('reply_to_user_id')
+    def has_arg_reply_to_user_id(self) -> bool:
+        return self.has_arg('reply_to_user_id')
 
     def is_ins_ent(self):
         return self.name.endswith('_01')
 
     def is_pick_ent(self):
         return self.name.endswith('_04')
+
 
 class G3Arg:
 
@@ -133,7 +134,11 @@ class G3Arg:
             return
         for ent_ty in [i for i in ent_ty_li if i.id == uncapitalize(annotation)]:
             self.ent_ty = ent_ty
-            self.ele_ty = EleTy.by_ent_ty(ent_ty)
+        ele_id = self.arg
+        if self.f_current or self.f_required:
+            ele_id = ele_id[5:]
+        ele_id += '_id'
+        self.ele_ty = EleTy.by_id(ele_id)
 
     @staticmethod
     def get_annotation(arg: _ast.arg) -> str:
@@ -188,16 +193,15 @@ class Menu:
 class MenuIt:
 
     def __init__(self, id_: str = '', lbl: str = '', parent: "MenuIt" = None, g3_cmd: Optional[G3Command] = None,
-                 menu: Optional[Menu] = None) -> None:
+                 menu: Optional[Menu] = None, args_str='') -> None:
         super().__init__()
-        if menu:
-            self.menu = menu
-        else:
+        self.menu = menu
+        if not self.menu and parent:
             self.menu = parent.menu
         self.parent = parent
         if self.parent and id_:
             self.id = f'{self.parent.id}:{id_}'
-        elif g3_cmd:
+        elif g3_cmd and self.menu:
             self.id = g3_cmd.name
         else:
             self.id = id_
@@ -207,7 +211,9 @@ class MenuIt:
             self.lbl = self.id
         self.g3_cmd: G3Command = g3_cmd
         self.it_li = []
-        self.menu.it_li.append(self)
+        if self.menu:
+            self.menu.it_li.append(self)
+        self.args_str = args_str
         if self.parent:
             self.parent.it_li.append(self)
 
@@ -219,3 +225,20 @@ class MenuIt:
 
     def __hash__(self) -> int:
         return hash(self.id)
+
+    def lbl_w_icon(self) -> str:
+        if self.it_li:
+            i = '📂'
+        elif self.id.endswith('_01'):
+            i = '📝'
+        elif self.id.endswith('_03'):
+            i = '🔎'
+        elif self.id.endswith('_04'):
+            i = '👉'
+        elif self.id.endswith('_33'):
+            i = '🔍'
+        elif self.id.endswith('back'):
+            i = '👈'
+        else:
+            return self.lbl
+        return f'{i} {self.lbl}'

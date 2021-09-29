@@ -24,6 +24,12 @@ class EleTy:
                 return ele
 
     @staticmethod
+    def by_id(id_: str) -> "EleTy":
+        for ele in ELE_TY_li:
+            if ele.id_ == id_:
+                return ele
+
+    @staticmethod
     def by_ent_ty(ent_ty: EntTy) -> "EleTy":
         for ele in ELE_TY_li:
             if ele.ent_ty == ent_ty:
@@ -71,10 +77,13 @@ class EntEleTy:
 
 ELE_TY_bkey = EleTy(id_='bkey', descr='B-Key', ui_len=20)
 ELE_TY_descr = EleTy(id_='descr', descr='Description', ui_len=20)
+ELE_TY_amnt = EleTy(id_='amnt', descr='Amount', ui_len=13, type=int)
 ELE_TY_tst_type = EleTy(id_='tst_type', descr='Type', ui_len=10)
+ELE_TY_su__user_id = EleTy(id_='su__user_id', descr='SU User', ui_len=10)
 ELE_TY_user_id = EleTy(id_='user_id', descr='User', col_name='tg_user_id', ui_len=10)
 ELE_TY_lc = EleTy(id_='lc', descr='LC', ui_len=2)
 ELE_TY_lc2 = EleTy(id_='lc2', descr='L2', col_name='lc2', ui_len=2)
+ELE_TY_out__chat_id = EleTy(id_='out__chat_id', descr='Out Chat', ui_len=10)
 ELE_TY_chat_id = EleTy(id_='chat_id', descr='Chat', col_name='tg_chat_id', ui_len=10)
 ELE_TY_cmd = EleTy(id_='cmd', descr='Command', ui_len=10)
 ELE_TY_cmd_prefix = EleTy(id_='cmd_prefix', descr='Cmd Pfx', ui_len=10)
@@ -95,7 +104,7 @@ ELE_TY_tst_mode.key_li = [dict(key='tst_mode_ed', descr='Admin: insert and updat
                           dict(key='tst_mode_exe', descr='Student: take the test')]
 
 ELE_TY_li = [ELE_TY_bkey, ELE_TY_tst_type,
-             ELE_TY_descr,
+             ELE_TY_descr, ELE_TY_amnt,
              ELE_TY_lc, ELE_TY_lc2,
              ELE_TY_user_id, ELE_TY_chat_id,
              ELE_TY_cmd, ELE_TY_cmd_prefix, ELE_TY_send_onyms,

@@ -4,6 +4,7 @@ from typing import Any
 
 from telegram import Update, Message, ParseMode, InlineKeyboardMarkup
 
+from g3b1_cfg.tg_cfg import G3Context
 from g3b1_data.elements import EleTy
 from g3b1_data.model import G3Result
 from g3b1_serv.generic_mdl import TgTable
@@ -28,7 +29,7 @@ if __name__ == '__main__':
 
 def no_data(update: Update) -> None:
     update.effective_message.reply_html(
-        'No g3b1_data found. Try /create <title/bkey>'
+        'No data.'
     )
     return
 
@@ -94,11 +95,28 @@ def li_send(upd: Update, send_li: list[str], reply_markup: InlineKeyboardMarkup 
 
 
 def send(upd: Update, send_str: str, reply_markup=None):
-    upd.effective_message.bot.send_message(
-        upd.effective_chat.id,
-        send_str, parse_mode=ParseMode.HTML,
-        reply_markup=reply_markup,
-        timeout=TIMEOUT)
+    if reply_markup and upd.callback_query:
+        query = upd.callback_query
+        upd.effective_message.bot.edit_message_text(
+            chat_id=upd.effective_chat.id,
+            message_id=query.message.message_id,
+            text=send_str, parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+            timeout=TIMEOUT)
+
+        return
+
+    if not reply_markup:
+        upd.effective_message.bot.send_message(
+            G3Context.out_chat_id(),
+            send_str, parse_mode=ParseMode.HTML,
+            timeout=TIMEOUT)
+    else:
+        upd.effective_message.bot.send_message(
+            upd.effective_chat.id,
+            send_str, parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+            timeout=TIMEOUT)
 
 
 def send_table(upd: Update, tbl_def, row_data, pfx_str: str = ''):

@@ -20,6 +20,7 @@ from g3b1_log.log import cfg_logger
 # This can be your own ID, or one for a developer group/channel.
 # You can use the /start command of this bot to see your chat id.
 from g3b1_serv import utilities, tg_reply, generic_hdl
+from g3b1_serv.generic_hdl import init_g3_ctx
 from g3b1_ui.model import TgUIC
 from subscribe.data import db
 from subscribe.serv import services as sub_services
@@ -58,12 +59,9 @@ def error_handler(update: object, context: CallbackContext) -> None:
 
 def start(upd: Update, ctx: CallbackContext) -> None:
     """Start menu and bot for user activation"""
-    G3Context.upd = upd
+    init_g3_ctx(upd, ctx)
 
-    # @g3b1_todo_bot -> todo
-    g3_m_str = upd.effective_message.bot.username.split("_")[1]
-    if g3_m_str == 'translate':
-        g3_m_str = 'trans'
+    g3_m_str = G3Context.g3_m_str
 
     settings.ins_init_setng()
     sub_services.bot_activate(g3_m_str)
@@ -105,7 +103,7 @@ def bot(g3_m_str: str, cmd_prefix: str, uname: str) -> None:
 
 def query_answer(upd: Update, ctx: CallbackContext) -> None:
     """Parses the CallbackQuery and updates the message text."""
-    G3Context.upd = upd
+    init_g3_ctx(upd, ctx)
     query = upd.callback_query
     qd_split = query.data.split(':', 1)
     g3_m_str = qd_split[0]
@@ -116,8 +114,8 @@ def query_answer(upd: Update, ctx: CallbackContext) -> None:
     if mi_id in g3_m.cmd_dct.keys():
         g3_cmd: G3Command = g3_m.cmd_dct[mi_id]
         sub_services.iup_setng_cmd_default(g3_cmd)
-    else:
-        sub_services.iup_setng_cmd_default()
+    # else:
+    #     sub_services.iup_setng_cmd_default()
 
     query.answer()
     if mi_id.endswith('33'):
@@ -135,21 +133,6 @@ def query_answer(upd: Update, ctx: CallbackContext) -> None:
     cmd_menu_func(upd, ctx)
     # CallbackQueries need to be answered, even if no notification to the user is needed
     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
-
-
-def go2(upd: Update):
-    """
-    Start function. Displayed whenever the /start command is called.
-    This function sets the language of the bot.
-    """
-    keyboard = [['<<', '😶', '🤔', '>>'],
-                ['❗', '❓', '🔐']]
-    message = "Choose an option!"
-
-    reply_markup = ReplyKeyboardMarkup(keyboard,
-                                       one_time_keyboard=True,
-                                       resize_keyboard=True)
-    tg_reply.send(upd, message, reply_markup=reply_markup)
 
 
 def start_bot(file: str,
@@ -176,7 +159,6 @@ def start_bot(file: str,
 
     # noinspection PyTypeChecker
     dispatcher.add_handler(CommandHandler('bot', bot))
-    dispatcher.add_handler(CommandHandler('go2', go2))
     # noinspection PyTypeChecker
     dispatcher.add_handler(CallbackQueryHandler(query_answer))
     dispatcher.add_handler(MessageHandler(

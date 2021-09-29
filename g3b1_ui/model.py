@@ -26,8 +26,14 @@ class TgUIC:
     def send(self, send_str: str, reply_markup: ReplyMarkup = None):
         tg_reply.send(self.upd, send_str, reply_markup)
 
+    def no_data(self):
+        tg_reply.no_data(self.upd)
+
     def cmd_sccs(self):
-        tg_reply.cmd_success(self.upd)
+        self.send('Command Successful!')
+
+    def cmd_fail(self):
+        tg_reply.cmd_err(self.upd)
 
     def send_settings(self, setng_dct):
         tg_reply.send_settings(self.upd, setng_dct)

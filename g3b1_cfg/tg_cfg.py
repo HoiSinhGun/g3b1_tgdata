@@ -8,6 +8,7 @@ from functools import cache
 from sqlalchemy import MetaData, create_engine, Table, delete, select, insert, asc
 from sqlalchemy.engine import Connection, CursorResult, Row, Engine
 from telegram import Update
+from telegram.ext import CallbackContext
 
 from g3b1_data.entities import EntTy
 from g3b1_data.model import G3Command, G3Module, G3Arg, script_by_file_str
@@ -22,10 +23,65 @@ eng_cfg = create_engine(f"sqlite:///{db_file_cfg}")
 
 class G3Context:
     upd: "Update" = None
+    ctx: CallbackContext = None
+    su__user_id: int = None
+    out__chat_id: int = None
     g3_m_str: str = None
     g3_cmd: "G3Command" = None
     eng: Engine = None
     md: MetaData = None
+
+    @classmethod
+    def as_dict(cls):
+        return {'upd': cls.upd, 'ctx': cls.ctx, 'su__user_id': cls.su__user_id,
+                'out__chat_id': cls.out__chat_id, 'g3_m_str': cls.g3_m_str,
+                'g3_cmd': cls.g3_cmd, 'eng': cls.eng, 'md': cls.md}
+
+    @classmethod
+    def from_dict(cls, v: dict):
+        cls.upd = v['upd']
+        cls.ctx = v['ctx']
+        cls.su__user_id = v['su__user_id']
+        cls.out__chat_id = v['out__chat_id']
+        cls.g3_m_str = v['g3_m_str']
+        cls.g3_cmd = v['g3_cmd']
+        cls.eng = v['eng']
+        cls.md = v['md']
+
+    # noinspection PyTypeChecker
+    @classmethod
+    def reset(cls):
+        cls.upd = None
+        cls.ctx = None
+        cls.su__user_id = None
+        cls.out__chat_id = None
+        cls.g3_cmd = None
+        cls.g3_m_str = None
+        # Set when bot starts up
+        # cls.eng = None
+        # cls.md = None
+
+    @classmethod
+    def chat_id(cls) -> int:
+        if cls.upd:
+            return cls.upd.effective_chat.id
+
+    @classmethod
+    def out_chat_id(cls) -> int:
+        if cls.out__chat_id:
+            return cls.out__chat_id
+        return cls.chat_id()
+
+    @classmethod
+    def user_id(cls) -> int:
+        if cls.upd:
+            return cls.upd.effective_user.id
+
+    @classmethod
+    def for_user_id(cls) -> int:
+        if cls.su__user_id:
+            return cls.su__user_id
+        return cls.user_id()
 
 
 def read_functions(py_file: str):
@@ -69,13 +125,13 @@ def ins_g3_m(g3_m: G3Module):
         # noinspection PyPropertyAccess
         sel_stmnt = select(tbl_g3_m).where(tbl_g3_m.c['name'] == g3_m.name)
         rs: CursorResult = con.execute(sel_stmnt)
-        if rs.fetchone():
+        if rs.first():
             return
 
         stmnt = insert(tbl_g3_m).values(dict(name=g3_m.name, file_main=g3_m.file_main))
         con.execute(stmnt)
         rs: CursorResult = con.execute(sel_stmnt)
-        g3_m_id = rs.fetchone()['id']
+        g3_m_id = rs.first()['id']
         for g3_cmd in g3_m.cmd_dct.values():
             stmnt = insert(tbl_g3_cmd).values(dict(g3_m_id=g3_m_id, name=g3_cmd.name,
                                                    long_name=g3_cmd.long_name, handler=g3_cmd.handler.__name__)
@@ -84,7 +140,7 @@ def ins_g3_m(g3_m: G3Module):
             # noinspection PyPropertyAccess
             sel_stmnt = select(tbl_g3_cmd).where(tbl_g3_cmd.c.g3_m_id == g3_m_id, tbl_g3_cmd.c.name == g3_cmd.name)
             rs = con.execute(sel_stmnt)
-            g3_cmd_id = rs.fetchone()['id']
+            g3_cmd_id = rs.first()['id']
             g3_arg: G3Arg
             for idx, g3_arg in enumerate(g3_cmd.g3_arg_li):
                 stmnt = insert(tbl_g3_cmd_arg).values(dict(g3_cmd_id=g3_cmd_id, arg=g3_arg.arg,
@@ -96,7 +152,7 @@ def ins_g3_m(g3_m: G3Module):
 # noinspection PyUnreachableCode
 @cache
 def sel_g3_m(g3_m_str: str) -> G3Module:
-    ent_ty_li:list[EntTy]=[]
+    ent_ty_li: list[EntTy] = []
     if g3_m_str == 'generic':
         module_hdl = importlib.import_module(f'g3b1_serv.generic_hdl')
     else:
@@ -109,7 +165,7 @@ def sel_g3_m(g3_m_str: str) -> G3Module:
         tbl_g3_cmd_arg: Table = meta_cfg.tables['g3_cmd_arg']
         sel_stmnt = select(tbl_g3_m).where(tbl_g3_m.c['name'] == g3_m_str)
         rs: CursorResult = con.execute(sel_stmnt)
-        row = rs.fetchone()
+        row = rs.first()
         if not row:
             # noinspection PyTypeChecker
             return

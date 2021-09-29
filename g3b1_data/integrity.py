@@ -83,15 +83,18 @@ def orm(con: Connection, tbl: Table, row: Row, from_row_any: Callable, repl_dct=
         repl_dct = {}
     col: Column
     for col_id, col in tbl.columns.items():
-        if col_id in repl_dct.keys() or col_id in ['act_ty', 'sus_bkey']:
+        if col_id in repl_dct.keys() or col_id in ['act_ty', 'sus_bkey', 'crcy']:
             continue
         fk: ForeignKey
         for fk in col.foreign_keys:
             if fk.column.key != 'id':
-                logger.error('foreign key target is not a column with the name "id"')
+                logger.error(f'foreign key ({fk}) target is not a column with the name "id"')
                 continue
             fk_tbl: Table = fk.column.table
             sql_stmnt: Select = select(fk_tbl)
+            if not row:
+                logger.error(f'row is None. Info: Tbl: {tbl} - FK: {fk}')
+                continue
             fk_ref_col_val = row[col_id]
             if not fk_ref_col_val:
                 repl_dct[col_id] = None

@@ -10,7 +10,7 @@ from sqlalchemy.engine import Row
 from sqlalchemy.sql import ColumnElement
 from telegram import Update, Message
 
-from g3b1_cfg.tg_cfg import sel_g3_m
+from g3b1_cfg.tg_cfg import sel_g3_m, G3Context
 from g3b1_data import tg_db
 from g3b1_data.model import G3Module, G3Command
 # import subscribe_main
@@ -231,12 +231,12 @@ def tst_for_sql() -> str:
     return dt_string
 
 
-def upd_extract_chat_user_id(upd: Update) -> (int, int):
-    return upd.effective_chat.id, upd.effective_user.id
+def upd_extract_chat_user_id() -> (int, int):
+    return G3Context.chat_id(), G3Context.for_user_id()
 
 
 def read_latest_cmd(upd: Update, g3_m: G3Module) -> Message:
-    return read_latest_message(*upd_extract_chat_user_id(upd), is_cmd_explicit=True, g3_m=g3_m)
+    return read_latest_message(*upd_extract_chat_user_id(), is_cmd_explicit=True, g3_m=g3_m)
 
 
 def read_latest_message(chat_id, user_id, is_cmd_explicit=False, g3_m: G3Module = None) -> Message:

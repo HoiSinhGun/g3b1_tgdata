@@ -22,7 +22,7 @@ class EntTy(Generic[ET]):
 
     @staticmethod
     def by_id(id_: str) -> "EntTy":
-        if id_.find(':'):
+        if id_.find(':') > 0:
             id_ = id_.split(':')[1]
         for ent in ENT_TY_li:
             if ent.id == id_:

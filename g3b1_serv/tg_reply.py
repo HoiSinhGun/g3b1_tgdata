@@ -4,11 +4,12 @@ from typing import Any
 
 from telegram import Update, Message, ParseMode, InlineKeyboardMarkup
 
-from g3b1_cfg.tg_cfg import G3Context
+from g3b1_cfg.tg_cfg import G3Ctx
 from g3b1_data.elements import EleTy
 from g3b1_data.model import G3Result
 from g3b1_serv.generic_mdl import TgTable
-from g3b1_serv.utilities import row_li_2_tbl, dc_dic_2_tbl, tbl_2_str
+from g3b1_serv.sql_utils import row_li_2_tbl, dc_dic_2_tbl, tbl_2_str
+from str_utils import bold, code
 
 TIMEOUT = 30.0
 
@@ -57,10 +58,10 @@ def cmd_err_key_not_found(upd: Update, obj_ty_descr: str, bkey: str):
     )
 
 
-def cmd_err_setng_miss(upd: Update, element: EleTy):
-    upd.effective_message.reply_html(
-        f'Command failed! Setting: {element.id_} is missing!'
-    )
+def cmd_err_setng_miss(element: EleTy):
+    reply(G3Ctx.upd,
+          f'Command failed! Setting: {element.id_} is missing!'
+          )
 
 
 # def cmd_entity_by_key_not_found(upd: Update)
@@ -108,7 +109,7 @@ def send(upd: Update, send_str: str, reply_markup=None):
 
     if not reply_markup:
         upd.effective_message.bot.send_message(
-            G3Context.out_chat_id(),
+            G3Ctx.out_chat_id(),
             send_str, parse_mode=ParseMode.HTML,
             timeout=TIMEOUT)
     else:
@@ -144,18 +145,6 @@ def hdl_retco(upd: Update, logto: logging.Logger, g3r: G3Result):
 
     cmd_success(upd)
     return
-
-
-def code(text: str) -> str:
-    return f'<code>{text}</code>'
-
-
-def bold(text: str) -> str:
-    return f'<b>{text}</b>'
-
-
-def italic(text: str) -> str:
-    return f'<i>{text}</i>'
 
 
 def send_settings(upd: Update, setng_dct: dict[str, Any]):

@@ -1,30 +1,13 @@
 import _ast
 import os
 from dataclasses import dataclass, field, asdict
-from typing import TypeVar, Generic, Callable, Optional
+from typing import TypeVar, Generic, Callable, Optional, Union
 
-from g3b1_data.elements import EleTy
+from constants import cfg_base_dir_code
+from g3b1_data.elements import EleTy, EleVal
 from g3b1_data.entities import EntTy
-from g3b1_serv.str_utils import uncapitalize
 
 T = TypeVar('T')
-
-
-@dataclass
-class G3Result(Generic[T]):
-    retco: int = 0
-    result: T = None
-
-
-@dataclass
-class G3Module:
-    file_main: str = field(repr=False)
-    cmd_dct: dict[str, "G3Command"] = field(default=None, repr=False)
-    name: str = field(init=False)
-    id_: int = None
-
-    def __post_init__(self):
-        self.name = g3m_str_by_file_str(self.file_main)
 
 
 def script_by_file_str(file: str) -> str:
@@ -38,7 +21,41 @@ def g3m_str_by_file_str(file: str) -> str:
     """
     if file.endswith('__init__.py') or file.endswith('tg_hdl.py'):
         return file.split(os.sep)[-2]
-    return script_by_file_str(file).split("_")[0]
+    if script_by_file_str(file).split("_")[0] == 'generic':
+        return 'generic'
+    else:
+        return file.replace(cfg_base_dir_code, '')
+
+
+class G3Result(Generic[T]):
+
+    def __init__(self, retco: int = 0, result: T = None) -> None:
+        super().__init__()
+        self.retco: int = retco
+        self.result: T = result
+
+    @classmethod
+    def from_ele_val(cls, ele_val: EleVal) -> "G3Result":
+        if ele_val.val:
+            return cls(result=ele_val.val)
+        else:
+            return cls(4)
+
+
+@dataclass
+class G3Module:
+    file_main: str = field(repr=False)
+    cmd_dct: dict[str, Union["G3Func", "G3Command"]] = field(default=None, repr=False)
+    name: str = field(init=False)
+    id_: int = None
+
+    def __post_init__(self):
+        self.name = g3m_str_by_file_str(self.file_main)
+
+    def add_g3_func(self, g3_func):
+        if not self.cmd_dct:
+            self.cmd_dct = {}
+        self.cmd_dct.update({g3_func.name, g3_func})
 
 
 @dataclass
@@ -46,6 +63,7 @@ class G3Command:
     g3_m: G3Module
     handler: Callable
     g3_arg_li: list["G3Arg"]  # = field(init=False, repr=True)
+    icon: str = field(init=False, repr=True)
     name: str = field(init=False, repr=True)
     long_name: str = field(init=False, repr=True)
     description: str = field(init=False, repr=True)
@@ -57,6 +75,9 @@ class G3Command:
         self.long_name = str(self.handler.__name__).replace('cmd_', f'{self.g3_m.name}_', 1)
         self.name = self.long_name.replace(f'{self.g3_m.name}_', '')
         self.description = self.handler.__doc__
+        self.icon = ''
+        if self.description and len(self.description) > 1 and self.description[1] == ' ':
+            self.icon = self.description[0]
 
     def as_dict_ext(self) -> dict:
         values = asdict(self)
@@ -120,7 +141,8 @@ class G3Command:
 
 class G3Arg:
 
-    def __init__(self, arg_: str, annotation: str, ent_ty_li: list[EntTy] = None) -> None:
+    def __init__(self, arg_: str, annotation: str, ent_ty_li: list[EntTy] = None,
+                 ele_ty_li: list[EleTy] = None) -> None:
         super().__init__()
         self.arg = arg_
         self.annotation = annotation
@@ -132,13 +154,13 @@ class G3Arg:
         self.ele_ty: EleTy = None
         if not ent_ty_li:
             return
-        for ent_ty in [i for i in ent_ty_li if i.id == uncapitalize(annotation)]:
+        for ent_ty in [i for i in ent_ty_li if i.type == annotation]:
             self.ent_ty = ent_ty
         ele_id = self.arg
         if self.f_current or self.f_required:
             ele_id = ele_id[5:]
         ele_id += '_id'
-        self.ele_ty = EleTy.by_id(ele_id)
+        self.ele_ty = EleTy.by_ent_ty(self.ent_ty, ele_ty_li)
 
     @staticmethod
     def get_annotation(arg: _ast.arg) -> str:
@@ -147,6 +169,17 @@ class G3Arg:
             return arg.annotation.id
         else:
             return ''
+
+
+class G3Func:
+
+    def __init__(self, g3_m: G3Module, func: Callable, fname: str, g3_arg_li: list[G3Arg]) -> None:
+        super().__init__()
+        self.g3_m: G3Module = g3_m
+        self.func = func
+        self.name = fname
+        self.g3_arg_li: list[G3Arg] = g3_arg_li
+        g3_m.add_g3_func(self)
 
 
 @dataclass

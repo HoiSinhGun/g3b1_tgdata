@@ -1,20 +1,27 @@
 import logging
-from typing import Optional
+from dataclasses import asdict
+from enum import Enum
+from typing import Optional, Any, Dict
 
-from sqlalchemy import MetaData, create_engine, func, select
+from sqlalchemy import MetaData, create_engine, func, select, and_
 from sqlalchemy import Table
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.engine import Result, Row, CursorResult
 from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Result, Row, CursorResult
 from sqlalchemy.event import listen
 from sqlalchemy.pool import Pool
 from sqlalchemy.sql import Select
 from telegram import Message, Chat, User  # noqa
 
+from elements import ELE_TY_chat_id
+from entities import EntId, ET, EntTy, get_meta_attr
+from g3b1_cfg.tg_cfg import G3Ctx
+from g3b1_data.integrity import orm
 from g3b1_data.model import G3Result
 from g3b1_data.tg_db_sqlite import tg_db_create_tables
 # create console handler and set level to debug
 from g3b1_log.log import cfg_logger
+from generic_mdl import ele_ty_by_ent_ty
 
 DB_FILE_TG = r'C:\Users\IFLRGU\Documents\dev\g3b1_tg.db'
 MetaData_TG = MetaData()
@@ -39,7 +46,7 @@ def fetch_id(con: Connection, rs, tbl_name: str) -> Optional[int]:
         return None
 
 
-def next_negative_ext_id(chat_id: int, user_id:int) -> G3Result[int]:
+def next_negative_ext_id(chat_id: int, user_id: int) -> G3Result[int]:
     with Engine_TG.connect() as con:
         tg_table: Table = MetaData_TG.tables["tg_message"]
         cols = tg_table.columns
@@ -77,7 +84,7 @@ def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3m_s
         result = rs.first()
 
         if not result:
-            return G3Result(4, None)
+            return G3Result(4)
 
         return G3Result(0, result)
 
@@ -195,6 +202,123 @@ def sel_msg_rng_by_chat_user(from_msg_id, chat_id, user_id) -> G3Result[list[dic
             msg_dct_li.append(d)
 
         return G3Result(0, msg_dct_li)
+
+
+def sel_ent_ty(ent_id: EntId[ET], con: Connection = None) -> G3Result[ET]:
+    ent_ty = ent_id.ent_ty
+    from_row_any, md, eng = get_meta_attr(ent_ty)
+
+    # noinspection PyShadowingNames
+    def wrapped(con: Connection):
+        tbl: Table = md.tables[ent_ty.tbl_name]
+        c = tbl.columns
+        if isinstance(ent_id.id, int):
+            where = (c['id'] == ent_id.id)
+        else:
+            bkey_clause = (c['bkey'] == ent_id.id)
+            if ent_id.g3_bot_id:
+                where = and_(
+                    c['g3_bot_id'] == ent_id.g3_bot_id,
+                    bkey_clause
+                )
+            elif ELE_TY_chat_id.id_ in tbl.c:
+                where = and_(
+                    c[ELE_TY_chat_id.id_] == G3Ctx.chat_id(),
+                    bkey_clause
+                )
+            else:
+                where = bkey_clause
+
+        stmnt = (select(tbl).
+                 where(where))
+
+        rs: Result = con.execute(stmnt)
+        row: Row = rs.first()
+        # fetch fk entities:
+        repl_dct = orm(con, tbl, row, from_row_any, {})
+        ent: ET = from_row_any(ent_ty, row, repl_dct)
+        for k, v in ent_ty.it_ent_ty_dct.items():
+            it_li = sel_ent_ty_by_par(ent, v, con)
+            setattr(ent, k, it_li)
+
+        return G3Result(0, ent)
+
+    if not con:
+        with eng.connect() as con:
+            return wrapped(con)
+    else:
+        return wrapped(con)
+
+
+def sel_ent_ty_by_par(ent: Any, ent_ty: ET, con: Connection = None) -> list[Any]:
+    from_row_any, md, eng = get_meta_attr(ent_ty)
+    ent_ty_par: EntTy = ent.ent_ty
+    ele_ty_par = ele_ty_by_ent_ty(ent_ty_par)
+    id_attr = getattr(ent, 'id')
+    if not id_attr:
+        id_attr = getattr(ent, 'id_')
+    repl_dct = {ele_ty_par.col_name: ent}
+
+    # noinspection PyShadowingNames
+    def wrapped(con: Connection, repl_dct: dict) -> list[Any]:
+        tbl: Table = md.tables[ent_ty.tbl_name]
+        c = tbl.columns
+        stmnt = (select(tbl).
+                 where(c[ele_ty_par.col_name] == id_attr))
+        cr: CursorResult = con.execute(stmnt)
+        row_li: list[Row] = cr.fetchall()
+        res_li: list[Any] = []
+        for row in row_li:
+            repl_dct = orm(con, tbl, row, from_row_any, repl_dct)
+            ent: ET = from_row_any(ent_ty, row, repl_dct)
+            for k, v in ent_ty.it_ent_ty_dct.items():
+                it_li = sel_ent_ty_by_par(ent, v, con)
+                setattr(ent, k, it_li)
+            res_li.append(ent)
+        return res_li
+
+    if not con:
+        with eng.connect() as con:
+            return wrapped(con, repl_dct)
+    else:
+        return wrapped(con, repl_dct)
+
+
+def sel_ent_ty_li(ent_ty: EntTy) -> list[Row]:
+    tbl: Table = G3Ctx.md.tables[ent_ty.tbl_name]
+    chat_id = G3Ctx.chat_id()
+    c = tbl.columns
+    with G3Ctx.eng.begin() as con:
+        if 'chat_id' in c:
+            stmnt = (select(tbl).
+                     where(c['chat_id'] == chat_id))
+        else:
+            stmnt = (select(tbl))
+        rs: CursorResult = con.execute(stmnt)
+        return rs.fetchall()
+
+
+def ins_ent_ty(ent: Any) -> G3Result[Any]:
+    val_dct = asdict(ent)
+    new_val_dct: dict = {}
+    for k, v in val_dct.items():
+        if v is None:
+            continue
+        if isinstance(v, Enum):
+            new_val_dct[k] = v.value
+        elif isinstance(v, Dict):
+            new_val_dct[f'{k}_id'] = v['id_']
+        else:
+            new_val_dct[k] = v
+    with G3Ctx.eng.begin() as con:
+        tbl: Table = G3Ctx.md.tables[ent.ent_ty().tbl_name]
+        stmnt = (insert(tbl).
+                 values(new_val_dct))
+        rs: CursorResult = con.execute(stmnt)
+        if not (id_ := fetch_id(con, rs, tbl.name)):
+            return G3Result(4)
+        g3r = sel_ent_ty(EntId(ent.ent_ty(), id_), con)
+        return g3r
 
 
 def main() -> None:

@@ -1,4 +1,8 @@
-from typing import Optional, TypeVar, Generic
+import importlib
+from typing import Optional, TypeVar, Generic, Callable, Union
+
+from sqlalchemy import MetaData
+from sqlalchemy.engine import Engine
 
 G3_M_TRANS = 'trans'
 G3_M_MONEY = 'money'
@@ -13,12 +17,6 @@ ET = TypeVar('ET')
 
 
 class EntTy(Generic[ET]):
-
-    @staticmethod
-    def by_tbl_name(tbl_name: str) -> "EntTy":
-        for ent in ENT_TY_li:
-            if ent.tbl_name == tbl_name:
-                return ent
 
     @staticmethod
     def by_id(id_: str) -> "EntTy":
@@ -36,7 +34,8 @@ class EntTy(Generic[ET]):
             if ent.cmd_prefix == cmd_prefix:
                 return ent
 
-    def __init__(self, g3_m_str: str, id_: str, descr: str, tbl_name: str = '', type_: str = '') -> None:
+    def __init__(self, g3_m_str: str, id_: str, descr: str, tbl_name: str = '', type_: str = '',
+                 sel_ent_ty='', it_ent_ty_dct: dict[str, "EntTy"] = None) -> None:
         super().__init__()
         self.g3_m_str: str = g3_m_str
         self.id: str = id_
@@ -51,6 +50,12 @@ class EntTy(Generic[ET]):
             self.type = ''
             for i in self.id.split('_'):
                 self.type += i.capitalize()
+        self.sel_ent_ty = sel_ent_ty
+        if it_ent_ty_dct:
+            self.it_ent_ty_dct = it_ent_ty_dct
+        else:
+            self.it_ent_ty_dct = {}
+
         self.cmd_prefix = ''
         self.but_cmd_def = ''
         self.but_cmd_li = []
@@ -64,32 +69,37 @@ class EntTy(Generic[ET]):
             return f'{self.cmd_prefix}{self.but_cmd_def} {text}'
         return self.cmd_prefix + but_tup_li[0][1]
 
+    def __eq__(self, o: object) -> bool:
+        return self.__hash__() == o.__hash__()
+
+    def __ne__(self, o: object) -> bool:
+        return not self.__eq__(o)
+
+    def __hash__(self) -> int:
+        return hash(self.id)
+
 
 print('initializing ENT_TY_LI')
 ENT_TY_li = []
 
-ENT_TY_tst_tplate = EntTy(G3_M_TRANS, 'tst_tplate', 'Test Template')
-ENT_TY_tst_tplate_it = EntTy(G3_M_TRANS, 'tst_tplate_it', 'Test Item')
-ENT_TY_tst_tplate_it_ans = EntTy(G3_M_TRANS, 'tst_tplate_it_ans', 'Test Answer')
-ENT_TY_tst_run = EntTy(G3_M_TRANS, 'tst_run', 'Tst Run')
-ENT_TY_tst_run_act = EntTy(G3_M_TRANS, 'tst_run_act', 'Tst Run Act')
-ENT_TY_tst_run_act_sus = EntTy(G3_M_TRANS, 'txt_run_act_sus', 'TstRun ActSus')
-ENT_TY_txt_seq = EntTy(G3_M_TRANS, 'txt_seq', 'Text Sequence', tbl_name='p_txt_seq')
-ENT_TY_txt_seq_it = EntTy(G3_M_TRANS, 'txt_seq_it', 'Txt Seq Item')
-ENT_TY_txtlc = EntTy(G3_M_TRANS, 'txtlc', 'Text in LC')
-ENT_TY_txtlc_mp = EntTy(G3_M_TRANS, 'txtlc_mp', 'Text in LC Mapping')
-ENT_TY_txtlc_onym = EntTy(G3_M_TRANS, 'txtlc_onym', 'Syn/Ant-onym')
-
-ENT_TY_trans_li = [ENT_TY_tst_tplate, ENT_TY_tst_tplate_it, ENT_TY_tst_tplate_it_ans,
-                   ENT_TY_tst_run, ENT_TY_tst_run_act, ENT_TY_tst_run_act_sus,
-                   ENT_TY_txt_seq, ENT_TY_txt_seq_it,
-                   ENT_TY_txtlc, ENT_TY_txtlc_mp, ENT_TY_txtlc_onym]
-ENT_TY_li.extend(ENT_TY_trans_li)
-
 
 class EntId(Generic[ET]):
 
-    def __init__(self, ent_ty: EntTy[ET], id_: int) -> None:
+    def __init__(self, ent_ty: EntTy[ET], id_: Union[int, str], g3_bot_id: int = None) -> None:
         super().__init__()
         self.ent_ty = ent_ty
         self.id = id_
+        self.g3_bot_id = g3_bot_id
+
+
+def get_meta_attr(ent_ty: EntTy) -> (Callable, MetaData, Engine):
+    from_row_any: Callable = getattr(
+        importlib.import_module(f'{ent_ty.g3_m_str}.data.integrity'), 'from_row_any'
+    )
+    md: MetaData = getattr(
+        importlib.import_module(f'{ent_ty.g3_m_str}.data'), f'md_{ent_ty.g3_m_str.upper()}'
+    )
+    eng: Engine = getattr(
+        importlib.import_module(f'{ent_ty.g3_m_str}.data'), f'eng_{ent_ty.g3_m_str.upper()}'
+    )
+    return from_row_any, md, eng

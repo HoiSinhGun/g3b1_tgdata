@@ -4,17 +4,45 @@ from datetime import datetime
 from queue import Queue
 from typing import Union, List, Tuple
 
+from sqlalchemy import MetaData
+from sqlalchemy.engine import Engine
 from telegram import Update, Bot, Message, User, Chat, ReplyMarkup, constants, MessageEntity
 from telegram.ext import CallbackContext, Dispatcher
 from telegram.utils.helpers import DEFAULT_NONE
 from telegram.utils.types import ODVInput, DVInput, JSONDict
 
-from g3b1_cfg.tg_cfg import init_g3_m
+from g3b1_cfg.tg_cfg import init_g3_m, G3Ctx
 from g3b1_log.log import cfg_log_tc
 from g3b1_serv import utilities
 from subscribe.data import db
 
 logger = cfg_log_tc(__name__, logging.INFO)
+
+
+class MockChat:
+
+    def __init__(self, id_: int) -> None:
+        super().__init__()
+        self.id = id_
+
+
+class MockUser:
+
+    def __init__(self, id_: int) -> None:
+        super().__init__()
+        self.id = id_
+
+
+class MockUpdate:
+
+    @classmethod
+    def sample(cls) -> "MockUpdate":
+        return cls(MockChat(-1), MockUser(1))
+
+    def __init__(self, chat: MockChat, user: MockUser) -> None:
+        super().__init__()
+        self.effective_chat = chat
+        self.effective_user = user
 
 
 class MsgCallback(object):
@@ -67,6 +95,13 @@ class MyMessage(Message):
         return self
         # return super().reply_html(text, disable_web_page_preview, disable_notification, reply_to_message_id,
         #                          reply_markup, timeout, api_kwargs, allow_sending_without_reply, entities, quote)
+
+
+def g3_context_mock(eng: Engine, md: MetaData, g3_m_str='MOCK'):
+    G3Ctx.upd = MockUpdate.sample()
+    G3Ctx.g3_m_str = g3_m_str
+    G3Ctx.eng = eng
+    G3Ctx.md = md
 
 
 def user_default() -> User:

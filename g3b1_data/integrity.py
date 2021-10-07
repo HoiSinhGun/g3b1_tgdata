@@ -7,8 +7,10 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.engine import Row, CursorResult, Engine, Result
 from sqlalchemy.sql import Select
 
+from g3b1_cfg.tg_cfg import G3Ctx
 from g3b1_data.entities import EntTy
 from g3b1_log.log import cfg_logger
+from generic_mdl import ent_ty_by_tbl_name
 
 logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
 
@@ -35,14 +37,17 @@ def meta_by_ent_ty(ent_ty: EntTy) -> MetaData:
     return meta_data
 
 
-def ref_tbl_dct(ent_ty: EntTy, meta: MetaData) -> dict[Table, list[str]]:
+def ref_tbl_dct(ent_ty: EntTy) -> dict[Table, list[str]]:
     if ent_ty.ref_tbl_dct is not None:
         return ent_ty.ref_tbl_dct
         # noinspection PyAttributeOutsideInit
+    md: MetaData = getattr(
+        importlib.import_module(f'{ent_ty.g3_m_str}.data'), f'md_{ent_ty.g3_m_str.upper()}'
+    )
     ent_ty.ref_tbl_dct = {}
     col_sfx = f'{ent_ty.tbl_name}_id'
-    for t in meta.tables:
-        tbl: Table = meta.tables[t]
+    for t in md.tables:
+        tbl: Table = md.tables[t]
         col_id_li = [k for k in tbl.columns.keys() if k.endswith(col_sfx)]
         if not col_id_li:
             continue
@@ -91,8 +96,8 @@ def orm(con: Connection, tbl: Table, row: Row, from_row_any: Callable, repl_dct=
                 logger.error(f'foreign key ({fk}) target is not a column with the name "id"')
                 continue
             fk_tbl: Table = fk.column.table
-            sql_stmnt: Select = select(fk_tbl)
-            if not row:
+            row.keys()
+            if row is None:
                 logger.error(f'row is None. Info: Tbl: {tbl} - FK: {fk}')
                 continue
             fk_ref_col_val = row[col_id]
@@ -103,10 +108,11 @@ def orm(con: Connection, tbl: Table, row: Row, from_row_any: Callable, repl_dct=
             if not isinstance(fk_ref_col_val, int):
                 break
 
+            sql_stmnt: Select = select(fk_tbl)
             sql_stmnt = sql_stmnt.where(fk_tbl.columns.id == int(fk_ref_col_val))
             rs: CursorResult = con.execute(sql_stmnt)
             fk_ref_row: Row = rs.first()
-            ent_ty = EntTy.by_tbl_name(fk_tbl.name)
+            ent_ty = ent_ty_by_tbl_name(fk_tbl.name, G3Ctx.g3_m_str)
             repl_dct[col_id] = from_row_any(ent_ty, fk_ref_row, {})
             break
     return repl_dct

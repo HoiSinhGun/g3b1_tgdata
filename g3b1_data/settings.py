@@ -1,19 +1,21 @@
 import logging
-from typing import Callable, Any
+from typing import Callable, Any, Union
 
 from sqlalchemy import MetaData, select
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine import Result
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.schema import Table
 
-from g3b1_cfg.tg_cfg import G3Context
+from converter import ele_ty_converter
+from g3b1_cfg.tg_cfg import G3Ctx
 from g3b1_data import integrity
-from g3b1_data.elements import EleTy
+from g3b1_data.elements import EleTy, EleVal
 from g3b1_data.entities import EntTy
 from g3b1_data.model import G3Result
 from g3b1_log.log import cfg_logger
+from generic_mdl import ele_ty_by_ent_ty
 
 logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
@@ -50,7 +52,7 @@ def chat_user_setting(chat_id: int, user_id: int, ele_ty: EleTy, ele_val: str = 
 def cu_setng(ele_ty: EleTy, ele_val: str = None) -> dict[str,]:
     """Prepare arg dictionary for a setting for the chat_id/user_id
         to read or write"""
-    params = dict(chat_id=G3Context.chat_id(), user_id=G3Context.for_user_id(), ele_ty=ele_ty)
+    params = dict(chat_id=G3Ctx.chat_id(), user_id=G3Ctx.for_user_id(), ele_ty=ele_ty)
     if ele_val is not None:
         params['ele_val'] = str(ele_val)
     return params
@@ -58,11 +60,11 @@ def cu_setng(ele_ty: EleTy, ele_val: str = None) -> dict[str,]:
 
 def ins_init_setng():
     con: Connection
-    user_id = G3Context.for_user_id()
-    chat_id = G3Context.upd.effective_chat.id
+    user_id = G3Ctx.for_user_id()
+    chat_id = G3Ctx.upd.effective_chat.id
 
-    with G3Context.eng.begin() as con:
-        ext_tg_chat: Table = G3Context.md.tables['ext_tg_chat']
+    with G3Ctx.eng.begin() as con:
+        ext_tg_chat: Table = G3Ctx.md.tables['ext_tg_chat']
         values = dict(id=chat_id)
         ext_insert: insert = insert(ext_tg_chat).values(values).on_conflict_do_update(
             index_elements=['id'],
@@ -70,7 +72,7 @@ def ins_init_setng():
         )
         con.execute(ext_insert)
 
-        ext_tg_user: Table = G3Context.md.tables['ext_tg_user']
+        ext_tg_user: Table = G3Ctx.md.tables['ext_tg_user']
         values = dict(id=user_id)
         ext_insert: insert = insert(ext_tg_user).values(values).on_conflict_do_update(
             index_elements=['id'],
@@ -78,7 +80,7 @@ def ins_init_setng():
         )
         con.execute(ext_insert)
 
-        tbl: Table = G3Context.md.tables['user_chat_settings']
+        tbl: Table = G3Ctx.md.tables['user_chat_settings']
         values = {'tg_user_id': user_id, 'tg_chat_id': chat_id}
         ins_stmnt: insert = insert(tbl).values(values).on_conflict_do_update(
             index_elements=values.keys(),
@@ -87,7 +89,11 @@ def ins_init_setng():
         con.execute(ins_stmnt)
 
 
-def iup_setting(con: Connection, meta_data: MetaData, params: dict[str, ...]) -> G3Result:
+def iup_setng(params: dict[str, ...]) -> dict[str, ...]:
+    return iup_setting(G3Ctx.eng, G3Ctx.md, params).result
+
+
+def iup_setting(con: Union[Connection, Engine], meta_data: MetaData, params: dict[str, ...]) -> G3Result:
     is_chat, is_user, tbl_name, tg_chat_id, tg_user_id = chat_user_setng_params(params)
     values: dict = {}
     index_elements: list = []
@@ -133,7 +139,7 @@ def sel_cu_setng_ref_li(con: Connection, meta_data: MetaData, ele_ty: EleTy, ele
 def ent_to_setng(ch_us_tup: tuple[int, int], ent: Any, ele_ty: EleTy = None) -> G3Result:
     ent_ty: EntTy = ent.ent_ty()
     if not ele_ty:
-        ele_ty = EleTy.by_ent_ty(ent_ty)
+        ele_ty = ele_ty_by_ent_ty(ent_ty)
     meta = integrity.meta_by_ent_ty(ent_ty)
     engine = integrity.engine_by_ent_ty(ent_ty)
     with engine.begin() as con:
@@ -149,7 +155,8 @@ def ent_by_setng(ch_us_tup: tuple[int, int], ele_ty: EleTy, sel_cb: Callable = N
     meta = integrity.meta_by_ent_ty(ent_ty)
     engine = integrity.engine_by_ent_ty(ent_ty)
     with engine.begin() as con:
-        g3r = read_setting(con, meta, chat_user_setting(ch_us_tup[0], ch_us_tup[1], ele_ty))
+        ele_val = read_setting(con, meta, chat_user_setting(ch_us_tup[0], ch_us_tup[1], ele_ty))
+        g3r = G3Result.from_ele_val(ele_val)
         if g3r.retco != 0:
             return g3r
         if sel_cb:
@@ -158,12 +165,33 @@ def ent_by_setng(ch_us_tup: tuple[int, int], ele_ty: EleTy, sel_cb: Callable = N
             return g3r
 
 
-def read_setting(con: Connection, meta_data: MetaData, params: dict[str, ...]) -> G3Result:
+@ele_ty_converter()
+def read_setng(ele_ty: EleTy) -> EleVal:
+    if ele_ty.ele_ty_tup:
+        setng_li: list[str] = []
+        for i in ele_ty.ele_ty_tup:
+            setng_dct = cu_setng(i)
+            setng = read_setting(G3Ctx.eng, G3Ctx.md, setng_dct)
+            setng_li.append(setng.val)
+        return EleVal(ele_ty, tuple(setng_li))
+    else:
+        setng_dct = cu_setng(ele_ty)
+        setng = read_setting(G3Ctx.eng, G3Ctx.md, setng_dct)
+        return setng
+
+
+def read_setting(con: Union[Connection, Engine], meta_data: MetaData, params: dict[str, ...]) -> EleVal:
+    """
+
+    Returns:
+        object:
+    """
     is_chat, is_user, tbl_name, tg_chat_id, tg_user_id = chat_user_setng_params(params)
 
     tbl_settings: Table = meta_data.tables[tbl_name]
     tbl_cols = tbl_settings.columns
-    colname = params['ele_ty'].col_name
+    ele_ty: EleTy = params['ele_ty']
+    colname = ele_ty.col_name
     sql_sel: Select = select(tbl_settings.columns[colname])
 
     if is_chat and is_user:
@@ -177,10 +205,10 @@ def read_setting(con: Connection, meta_data: MetaData, params: dict[str, ...]) -
     rs: Result = con.execute(sql_sel)
     result = rs.first()
 
-    if not result or not result[colname]:
-        return G3Result(4, None)
+    if result and result[colname]:
+        return EleVal(ele_ty, result[colname])
 
-    return G3Result(0, result[colname])
+    return EleVal(ele_ty, '')
 
 
 def chat_user_setng_params(params):

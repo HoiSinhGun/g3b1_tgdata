@@ -7,10 +7,10 @@ from typing import Callable
 
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Engine
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
-from g3b1_cfg.tg_cfg import G3Context, init_g3_m
+from g3b1_cfg.tg_cfg import G3Ctx, init_g3_m, del_g3_m_by_file, init_g3_m_for_scripts, del_g3_m_of_scripts
 from g3b1_cfg.tg_cfg import sel_g3_m
 from g3b1_data import settings
 from g3b1_data.entities import EntTy
@@ -19,7 +19,7 @@ from g3b1_data.tg_db_sqlite import tg_db_create_tables
 from g3b1_log.log import cfg_logger
 # This can be your own ID, or one for a developer group/channel.
 # You can use the /start command of this bot to see your chat id.
-from g3b1_serv import utilities, tg_reply, generic_hdl
+from g3b1_serv import utilities, generic_hdl
 from g3b1_serv.generic_hdl import init_g3_ctx
 from g3b1_ui.model import TgUIC
 from subscribe.data import db
@@ -27,7 +27,7 @@ from subscribe.serv import services as sub_services
 
 DEVELOPER_CHAT_ID = -579559871
 
-logger = cfg_logger(logging.getLogger(__name__), logging.DEBUG)
+logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
 
 def error_handler(update: object, context: CallbackContext) -> None:
@@ -61,7 +61,7 @@ def start(upd: Update, ctx: CallbackContext) -> None:
     """Start menu and bot for user activation"""
     init_g3_ctx(upd, ctx)
 
-    g3_m_str = G3Context.g3_m_str
+    g3_m_str = G3Ctx.g3_m_str
 
     settings.ins_init_setng()
     sub_services.bot_activate(g3_m_str)
@@ -70,9 +70,10 @@ def start(upd: Update, ctx: CallbackContext) -> None:
     if ctx and ctx.args and len(ctx.args) > 0:
         cmd_scope = ctx.args[0]
 
+    # noinspection PyUnusedLocal
     commands_str = utilities.build_commands_str(sel_g3_m(g3_m_str).cmd_dct, cmd_scope)
     upd.effective_message.reply_html(
-        commands_str +
+        # commands_str +
         utilities.build_debug_str(upd)
     )
 
@@ -108,11 +109,12 @@ def query_answer(upd: Update, ctx: CallbackContext) -> None:
     qd_split = query.data.split(':', 1)
     g3_m_str = qd_split[0]
     mi_id = qd_split[1]
+    mi_cmd = mi_id.replace(':', '_')
     g3_m: G3Module = sel_g3_m(g3_m_str)
-    sub_services.iup_setng_cmd_prefix(cmd_prefix=mi_id, g3_m_str=g3_m_str)
+    sub_services.iup_setng_cmd_prefix(cmd_prefix=mi_cmd, g3_m_str=g3_m_str)
 
-    if mi_id in g3_m.cmd_dct.keys():
-        g3_cmd: G3Command = g3_m.cmd_dct[mi_id]
+    if mi_cmd in g3_m.cmd_dct.keys():
+        g3_cmd: G3Command = g3_m.cmd_dct[mi_cmd]
         sub_services.iup_setng_cmd_default(g3_cmd)
     # else:
     #     sub_services.iup_setng_cmd_default()
@@ -135,19 +137,26 @@ def query_answer(upd: Update, ctx: CallbackContext) -> None:
     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
 
 
+# noinspection PyDefaultArgument
 def start_bot(file: str,
               eng: Engine, md: MetaData,
-              hdl_for_message: Callable = hdl_message):
+              hdl_for_message: Callable = hdl_message, script_li: list[str] = []):
     # ,  hdl_for_start: callable = start, hdl_for_message: callable = hdl_message):
     """Run the bot."""
-    G3Context.eng = eng
-    G3Context.md = md
+    G3Ctx.eng = eng
+    G3Ctx.md = md
+    del_g3_m_by_file(file)
     bot_li: dict[str, dict] = db.bot_all()
     g3_m: G3Module = init_g3_m(file)
     cmd_dct: dict = g3_m.cmd_dct
 
     bot_dict: dict = bot_li[g3_m.name]
     bot_token = bot_dict['token']
+
+    all_script_li = [settings.__file__]
+    all_script_li.extend(script_li)
+    del_g3_m_of_scripts(all_script_li)
+    init_g3_m_for_scripts(all_script_li, [g3_m.name])
 
     # Create the Updater and pass it your bot's token.
     updater = Updater(bot_token)

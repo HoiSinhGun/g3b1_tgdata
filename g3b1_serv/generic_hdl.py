@@ -1,42 +1,46 @@
 import functools
 import importlib
-from _ast import FunctionDef
+import logging
 
 from sqlalchemy import MetaData, Table, select
 from sqlalchemy.engine import Engine, Result, Row
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
 
-from g3b1_cfg.tg_cfg import G3Context
-from g3b1_cfg.tg_cfg import ins_g3_m, sel_g3_m
+import tg_db
+from g3b1_cfg import tg_cfg
+from g3b1_cfg.tg_cfg import G3Ctx
 from g3b1_data import settings
-from g3b1_data.elements import ELE_TY_user_id, ELE_TY_su__user_id, ELE_TY_out__chat_id
+from g3b1_data.elements import ELE_TY_user_id, ELE_TY_su__user_id, ELE_TY_out__chat_id, EleTy
 from g3b1_data.entities import EntTy, EntId
-from g3b1_data.model import G3Command, G3Module, g3m_str_by_file_str, MenuIt, G3Arg
+from g3b1_data.model import G3Command, MenuIt, Menu
+from g3b1_log.log import cfg_logger
 from g3b1_serv import utilities
-from g3b1_serv.tg_reply import bold
-from g3b1_serv.utilities import upd_extract_chat_user_id, sql_rs_2_tbl
 from g3b1_ui.model import TgUIC
+from settings import cu_setng
+from sql_utils import sql_rs_2_tbl
 from subscribe.data.db import eng_SUB, md_SUB
 from subscribe.serv import services as sub_services
 
+logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
+
 
 def init_g3_ctx(upd: Update, ctx: CallbackContext):
-    G3Context.upd = upd
-    G3Context.ctx = ctx
-    G3Context.g3_cmd = None
-    G3Context.g3_m_str = None
+    G3Ctx.upd = upd
+    G3Ctx.ctx = ctx
+    G3Ctx.g3_cmd = None
+    G3Ctx.g3_m_str = None
     setng = settings.cu_setng(ELE_TY_su__user_id)
-    setng['user_id'] = G3Context.user_id()
-    G3Context.su__user_id = settings.read_setting(eng_SUB, md_SUB, setng).result
+    setng['user_id'] = G3Ctx.user_id()
+    G3Ctx.su__user_id = settings.read_setting(eng_SUB, md_SUB, setng).val
     setng['ele_ty'] = ELE_TY_out__chat_id
-    G3Context.out__chat_id = settings.read_setting(eng_SUB, md_SUB, setng).result
+    G3Ctx.out__chat_id = settings.read_setting(eng_SUB, md_SUB, setng).val
     TgUIC.uic = TgUIC(upd)
     g3_m_str = ctx.bot.username.split('_')[1]
     if g3_m_str == 'translate':
         g3_m_str = 'trans'
 
-    G3Context.g3_m_str = g3_m_str
+    G3Ctx.g3_m_str = g3_m_str
 
 
 def tg_handler():
@@ -58,8 +62,8 @@ def tg_handler():
             init_g3_ctx(upd, ctx)
 
             g3_cmd: G3Command = utilities.g3_cmd_by_func(cmd_func)
-            G3Context.g3_cmd = g3_cmd
-            G3Context.g3_m_str = g3_cmd.g3_m.name
+            G3Ctx.g3_cmd = g3_cmd
+            G3Ctx.g3_m_str = g3_cmd.g3_m.name
 
             # noinspection PyTypeChecker
             ent_ty: EntTy = None
@@ -112,14 +116,29 @@ def tg_handler():
                     kwargs.update({item.arg: arg_val})
                 else:
                     kwargs.update({item.arg: None})
+                if item.f_required and not kwargs[item.arg]:
+                    TgUIC.uic.send(f'❌ No value for {item.arg} provided!')
+                    return
+
             ent_ty_arg_li = g3_cmd.ent_ty_args()
+            cmd_arg_li = [i for i in g3_cmd.extra_args() if
+                          (i.f_current == True and i not in ent_ty_arg_li)]
+            for item in cmd_arg_li:
+                ele_ty_id = item.arg.replace('cur__', '')
+                if ele_ty := EleTy.by_id(ele_ty_id):  # one of tg_data package
+                    ele_val = settings.read_setng(ele_ty)
+                    if ele_val.val_mp:
+                        kwargs.update({item.arg: ele_val.val_mp})
+                    else:
+                        kwargs.update({item.arg: ele_val.val})
+
             if ent_ty_arg_li:
-                modu_db = importlib.import_module(f'{G3Context.g3_m_str}.data.db')
+                modu_db = importlib.import_module(f'{G3Ctx.g3_m_str}.data.db')
                 # noinspection PyArgumentList
-                sel_ent_ty = getattr(modu_db, 'sel_ent_ty', 'NULL')
+                sel_ent_ty = getattr(modu_db, 'sel_ent_ty', tg_db.sel_ent_ty)
                 for g3_arg in ent_ty_arg_li:
                     if g3_arg.f_current:
-                        ent_r_id = settings.ent_by_setng(upd_extract_chat_user_id(), g3_arg.ele_ty,
+                        ent_r_id = settings.ent_by_setng((G3Ctx.chat_id(), G3Ctx.for_user_id()), g3_arg.ele_ty,
                                                          ent_ty=g3_arg.ent_ty).result
                     elif g3_arg.f_required:
                         ent_r_id = kwargs[g3_arg.arg]
@@ -128,7 +147,11 @@ def tg_handler():
                     else:
                         ent_r_id = 0
                     if isinstance(ent_r_id, int) and ent_r_id:
-                        ent_r = sel_ent_ty(EntId(g3_arg.ent_ty, ent_r_id)).result
+                        if g3_arg.ent_ty.sel_ent_ty:
+                            s_sel_ent_ty = getattr(modu_db, g3_arg.ent_ty.sel_ent_ty)
+                        else:
+                            s_sel_ent_ty = sel_ent_ty
+                        ent_r = s_sel_ent_ty(EntId(g3_arg.ent_ty, ent_r_id)).result
                         kwargs.update({g3_arg.arg: ent_r})
                     else:
                         kwargs.update({g3_arg.arg: None})
@@ -153,7 +176,7 @@ def tg_handler():
                             # src_msg is the message assumed to be the input for the command
                             # if no msg has been replied to
                             # it can not be safely guessed to be the latest chat-message
-                            src_msg = utilities.read_latest_message(chat_id, user_id)
+                            src_msg = utilities.read_latest_message()
                     new_arg_li.append(src_msg)
             if g3_cmd.has_arg_reply_to_user_id():
                 if reply_to_msg:
@@ -171,8 +194,8 @@ def tg_handler():
             output = cmd_func(*new_arg_li, **kwargs)
             if (g3_cmd.is_ins_ent() or g3_cmd.is_pick_ent()) and output:
                 settings.ent_to_setng(
-                    upd_extract_chat_user_id(), output)
-            G3Context.reset()
+                    (G3Ctx.chat_id(), G3Ctx.for_user_id()), output)
+            G3Ctx.reset()
             return output
 
         return wrapper_handler
@@ -181,8 +204,8 @@ def tg_handler():
 
 
 @tg_handler()
-def cmd_ent_ty_33_li(upd: Update, ent_ty: EntTy):
-    chat_id, user_id = upd_extract_chat_user_id()
+def cmd_ent_ty_33_li(ent_ty: EntTy):
+    chat_id = G3Ctx.chat_id()
     md: MetaData = getattr(
         importlib.import_module(f'{ent_ty.g3_m_str}.data'), f'md_{ent_ty.g3_m_str.upper()}'
     )
@@ -243,21 +266,6 @@ def cmd_ent_ty_33_li(upd: Update, ent_ty: EntTy):
     # tg_reply.send_table(upd, tbl_def, val_dct_li, '')
 
 
-def init_g3_m_dct():
-    g3_m = sel_g3_m(g3m_str_by_file_str(__file__))
-    if not g3_m:
-        print('Initialize G3_M_DCT')
-        g3_m: G3Module = G3Module(__file__, {})
-
-        func_def: FunctionDef = utilities.read_function(__file__,
-                                                        cmd_ent_ty_33_li.__name__)
-        # noinspection PyUnresolvedReferences
-        g3_cmd: G3Command = G3Command(g3_m, cmd_ent_ty_33_li,
-                                      [G3Arg(arg.arg, arg.annotation.id) for arg in func_def.args.args])
-        g3_m.cmd_dct['ent_ty_33_li'] = g3_cmd
-        ins_g3_m(g3_m)
-
-
 def send_ent_ty_keyboard(ent_ty: EntTy):
     keyboard = []
     for but_row in ent_ty.but_cmd_li:
@@ -270,7 +278,8 @@ def send_ent_ty_keyboard(ent_ty: EntTy):
     TgUIC.uic.send(ent_ty.keyboard_descr, reply_markup=reply_markup)
 
 
-def send_menu_keyboard(root_str: str, mi_li: list[MenuIt]):
+def send_menu_keyboard(menu: Menu, mi_li: list[MenuIt]):
+    root_str = menu.lbl
     keyboard = []
     kb_row = []
     for mi in mi_li:
@@ -283,14 +292,17 @@ def send_menu_keyboard(root_str: str, mi_li: list[MenuIt]):
             menu_id = mi.menu.id + ':'
         elif mi.g3_cmd:
             menu_id = mi.g3_cmd.g3_m.name + ':'
-        kb_row.append(InlineKeyboardButton(mi.lbl_w_icon(), callback_data=f'{menu_id}{mi.id}'))
+        cb_data = f'{menu_id}{mi.id} {mi.args_str}'.strip()
+        logger.debug(f'app but: {mi.lbl_w_icon()} - {cb_data}')
+        kb_row.append(InlineKeyboardButton(mi.lbl_w_icon(), callback_data=cb_data))
     keyboard.append(kb_row)
 
     # ReplyKeyboardMarkup
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    send_str = f'Choose a menu item for {bold(root_str)}'
-    TgUIC.uic.send(send_str, reply_markup)
+    if not root_str:
+        root_str = 'Choose a menu item'
+    TgUIC.uic.send(root_str, reply_markup)
 
 
-init_g3_m_dct()
+tg_cfg.init_cfg()

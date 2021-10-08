@@ -3,15 +3,19 @@ from pydoc import html
 from typing import Any
 
 from telegram import Update, Message, ParseMode, InlineKeyboardMarkup
+from telegram.error import BadRequest
 
 from g3b1_cfg.tg_cfg import G3Ctx
 from g3b1_data.elements import EleTy
 from g3b1_data.model import G3Result
 from g3b1_serv.generic_mdl import TgTable
 from g3b1_serv.sql_utils import row_li_2_tbl, dc_dic_2_tbl, tbl_2_str
+from g3b1_log.log import cfg_logger
 from str_utils import bold, code
 
 TIMEOUT = 30.0
+
+logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
 
 def cmd_success(upd: Update):
@@ -98,13 +102,16 @@ def li_send(upd: Update, send_li: list[str], reply_markup: InlineKeyboardMarkup 
 def send(upd: Update, send_str: str, reply_markup=None):
     if reply_markup and upd.callback_query:
         query = upd.callback_query
-        upd.effective_message.bot.edit_message_text(
-            chat_id=upd.effective_chat.id,
-            message_id=query.message.message_id,
-            text=send_str, parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup,
-            timeout=TIMEOUT)
-
+        try:
+            upd.effective_message.bot.edit_message_text(
+                chat_id=upd.effective_chat.id,
+                message_id=query.message.message_id,
+                text=send_str, parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
+                timeout=TIMEOUT)
+        except BadRequest as msg:
+            if not (msg.message.startswith('Message is not modified')):
+                logger.exception(msg)
         return
 
     if not reply_markup:

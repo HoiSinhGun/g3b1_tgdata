@@ -8,11 +8,12 @@ from sqlalchemy.engine import Result
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.schema import Table
 
-from converter import ele_ty_converter
+from decorator import ele_ty_converter
+from elements import EleVal
 from g3b1_cfg.tg_cfg import G3Ctx
 from g3b1_data import integrity
 from g3b1_data.elements import EleTy, EleVal
-from g3b1_data.entities import EntTy
+from g3b1_data.entities import EntTy, EntId
 from g3b1_data.model import G3Result
 from g3b1_log.log import cfg_logger
 from generic_mdl import ele_ty_by_ent_ty
@@ -58,9 +59,19 @@ def cu_setng(ele_ty: EleTy, ele_val: str = None) -> dict[str,]:
     return params
 
 
-def ins_init_setng():
+def c_setng(ele_ty: EleTy, ele_val: str = None) -> dict[str, Any]:
+    """Prepare arg dictionary for a setting for the chat_id
+        to read or write"""
+    params = dict(chat_id=G3Ctx.chat_id(), ele_ty=ele_ty)
+    if ele_val is not None:
+        params['ele_val'] = str(ele_val)
+    return params
+
+
+def ins_init_setng(user_id=0):
     con: Connection
-    user_id = G3Ctx.for_user_id()
+    if not user_id:
+        user_id = G3Ctx.for_user_id()
     chat_id = G3Ctx.upd.effective_chat.id
 
     with G3Ctx.eng.begin() as con:
@@ -120,8 +131,7 @@ def iup_setting(con: Union[Connection, Engine], meta_data: MetaData, params: dic
     return G3Result(0, params)
 
 
-def sel_cu_setng_ref_li(con: Connection, meta_data: MetaData, ele_ty: EleTy, ele_val: int) -> list[
-    dict[str, ...]]:
+def sel_cu_setng_ref_li(con: Connection, meta_data: MetaData, ele_ty: EleTy, ele_val: int) -> list[dict[str, ...]]:
     refs_li = []
     tbl_settings: Table = meta_data.tables['user_chat_settings']
     tbl_cols = tbl_settings.columns
@@ -137,46 +147,77 @@ def sel_cu_setng_ref_li(con: Connection, meta_data: MetaData, ele_ty: EleTy, ele
 
 
 def ent_to_setng(ch_us_tup: tuple[int, int], ent: Any, ele_ty: EleTy = None) -> G3Result:
-    ent_ty: EntTy = ent.ent_ty()
+    if callable(ent.ent_ty):
+        ent_ty: EntTy = ent.ent_ty()
+    else:
+        ent_ty: EntTy = ent.ent_ty
     if not ele_ty:
         ele_ty = ele_ty_by_ent_ty(ent_ty)
     meta = integrity.meta_by_ent_ty(ent_ty)
     engine = integrity.engine_by_ent_ty(ent_ty)
     with engine.begin() as con:
-        g3r = iup_setting(con, meta, chat_user_setting(
-            ch_us_tup[0], ch_us_tup[1],
-            ele_ty, ent.id_))
+        ent_id = None
+        if hasattr(ent, 'id_') and ent.id_:
+            ent_id = ent.id_
+        elif hasattr(ent, 'id') and ent.id:
+            ent_id = ent.id
+        if ch_us_tup[1]:
+            g3r = iup_setting(con, meta, chat_user_setting(
+                ch_us_tup[0], ch_us_tup[1],
+                ele_ty, ent_id))
+        else:
+            g3r = iup_setting(con, meta, chat_setting(
+                ch_us_tup[0],
+                ele_ty, ent_id))
+
         return g3r
 
 
-def ent_by_setng(ch_us_tup: tuple[int, int], ele_ty: EleTy, sel_cb: Callable = None, ent_ty: EntTy = None) -> G3Result:
+def ent_by_setng(ch_us_tup: tuple[int, int], ele_ty: EleTy, sel_cb: Callable = None, ent_ty: EntTy = None,
+                 is_chat_setng=False) -> G3Result:
     if not ent_ty:
         ent_ty: EntTy = ele_ty.ent_ty
     meta = integrity.meta_by_ent_ty(ent_ty)
     engine = integrity.engine_by_ent_ty(ent_ty)
     with engine.begin() as con:
-        ele_val = read_setting(con, meta, chat_user_setting(ch_us_tup[0], ch_us_tup[1], ele_ty))
+
+        params = chat_setting(ch_us_tup[0], ele_ty) if is_chat_setng \
+            else chat_user_setting(ch_us_tup[0], ch_us_tup[1], ele_ty)
+        ele_val = read_setting(con, meta, params)
         g3r = G3Result.from_ele_val(ele_val)
+
         if g3r.retco != 0:
             return g3r
         if sel_cb:
-            return sel_cb(g3r.result)
+
+            entid = g3r.result
+            if ele_ty.ent_ty:
+                return sel_cb(EntId(ele_ty.ent_ty, entid))
+            return sel_cb(entid)
         else:
             return g3r
 
 
 @ele_ty_converter()
-def read_setng(ele_ty: EleTy) -> EleVal:
+def read_setng(ele_ty: EleTy, is_chat_setng=False) -> EleVal:
     if ele_ty.ele_ty_tup:
         setng_li: list[str] = []
         for i in ele_ty.ele_ty_tup:
-            setng_dct = cu_setng(i)
+            if is_chat_setng:
+                setng_dct = c_setng(i)
+            else:
+                setng_dct = cu_setng(i)
             setng = read_setting(G3Ctx.eng, G3Ctx.md, setng_dct)
             setng_li.append(setng.val)
         return EleVal(ele_ty, tuple(setng_li))
     else:
-        setng_dct = cu_setng(ele_ty)
-        setng = read_setting(G3Ctx.eng, G3Ctx.md, setng_dct)
+        if is_chat_setng:
+            setng_dct = c_setng(ele_ty)
+        else:
+            setng_dct = cu_setng(ele_ty)
+        setng: EleVal = read_setting(G3Ctx.eng, G3Ctx.md, setng_dct)
+        if ele_ty.type == bool:
+            setng.val_mp = bool(setng.val)
         return setng
 
 

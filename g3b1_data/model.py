@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass, field, asdict
 from typing import TypeVar, Generic, Callable, Optional, Union
 
-from constants import cfg_base_dir_code
+from constants import env_g3b1_code
 from g3b1_data.elements import EleTy, EleVal
 from g3b1_data.entities import EntTy
 
@@ -17,14 +17,15 @@ def script_by_file_str(file: str) -> str:
 
 
 def g3m_str_by_file_str(file: str) -> str:
-    """E.g. python script base file = tg_hdl.py => subscribe.
+    """E.g. python script base file = trans__tg_hdl.py => subscribe.
+    New file pattern: {g3_m_str}__tg_hdl.py, e.g. trans__tg_hdl.py
     """
-    if file.endswith('__init__.py') or file.endswith('tg_hdl.py'):
+    if file.endswith('__init__.py') or file.endswith('trans__tg_hdl.py'):
         return file.split(os.sep)[-2]
     if script_by_file_str(file).split("_")[0] == 'generic':
         return 'generic'
     else:
-        return file.replace(cfg_base_dir_code, '')
+        return file.replace(env_g3b1_code, '')
 
 
 class G3Result(Generic[T]):
@@ -68,7 +69,7 @@ class G3Command:
     long_name: str = field(init=False, repr=True)
     description: str = field(init=False, repr=True)
     id_: int = None
-    special_arg_li = ['upd', 'ctx', 'reply_to_msg', 'src_msg', 'reply_to_user_id', 'chat_id', 'user_id',
+    special_arg_li = ['upd', 'ctx', 'reply_to_msg', 'src_msg', 'src_bot_msg', 'reply_to_user_id', 'chat_id', 'user_id',
                       'ent_ty']
 
     def __post_init__(self):
@@ -128,6 +129,9 @@ class G3Command:
 
     def has_arg_src_msg(self) -> bool:
         return self.has_arg('src_msg')
+
+    def has_arg_src_bot_msg(self) -> bool:
+        return self.has_arg('src_bot_msg')
 
     def has_arg_reply_to_user_id(self) -> bool:
         return self.has_arg('reply_to_user_id')

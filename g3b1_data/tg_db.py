@@ -1,18 +1,22 @@
 import logging
+import sys
 from dataclasses import asdict
 from enum import Enum
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Tuple, Callable
 
-from sqlalchemy import MetaData, create_engine, func, select, and_
+from sqlalchemy import MetaData, create_engine, func, select, and_, update, delete
 from sqlalchemy import Table
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine import Result, Row, CursorResult
 from sqlalchemy.event import listen
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import Pool
 from sqlalchemy.sql import Select
 from telegram import Message, Chat, User  # noqa
 
+from constants import env_g3b1_dir
+from subscribe.data.model import G3File
 from elements import ELE_TY_chat_id
 from entities import EntId, ET, EntTy, get_meta_attr
 from g3b1_cfg.tg_cfg import G3Ctx
@@ -22,8 +26,9 @@ from g3b1_data.tg_db_sqlite import tg_db_create_tables
 # create console handler and set level to debug
 from g3b1_log.log import cfg_logger
 from generic_mdl import ele_ty_by_ent_ty
+from py_meta import ent_as_dict, ent_as_dict_sql
 
-DB_FILE_TG = r'C:\Users\IFLRGU\Documents\dev\g3b1_tg.db'
+DB_FILE_TG = rf'{env_g3b1_dir}\g3b1_tg.db'
 MetaData_TG = MetaData()
 Engine_TG = create_engine(f"sqlite:///{DB_FILE_TG}")
 MetaData_TG.reflect(bind=Engine_TG)
@@ -32,6 +37,7 @@ logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
 TABLE_TG_USER = "tg_user"
 TABLE_TG_CHAT = "tg_chat"
+TABLE_FILE = "sub_file"
 
 
 def fetch_id(con: Connection, rs, tbl_name: str) -> Optional[int]:
@@ -67,16 +73,13 @@ def next_negative_ext_id(chat_id: int, user_id: int) -> G3Result[int]:
         return G3Result(0, ext_id)
 
 
-def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3m_str='') -> G3Result[Row]:
+def sel_message(chat_id: int, message_id: int) -> G3Result[Row]:
     with Engine_TG.connect() as con:
         tg_table: Table = MetaData_TG.tables["tg_message"]
         cols = tg_table.columns
         sql_sel: Select = select(cols['tg_chat_id'], cols['ext_id'], cols['tg_user_id'],
-                                 func.max(cols['date']).label('date'), cols['text'])
-        where_clause = ((cols.tg_chat_id == chat_id) & (cols.tg_user_id == user_id) & (
-                cols.g3_cmd_explicit == is_cmd_explicit))
-        if g3m_str:
-            where_clause = (where_clause & (cols.bot_module == g3m_str))
+                                 cols['date'], cols['text'], cols['sub_module'])
+        where_clause = (cols.tg_chat_id == chat_id) & (cols.ext_id == message_id)
         sql_sel = sql_sel.where(where_clause)
 
         logger.debug(sql_sel)
@@ -89,19 +92,52 @@ def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3m_s
         return G3Result(0, result)
 
 
-def synchronize_user(con: Connection, row: User):
-    tg_table: Table = MetaData_TG.tables["tg_user"]
-    logger.debug(f"Table: {tg_table}")
-    logger.debug(f"Row: {row}")
-    values = dict(ext_id=row.id, username=row.username, first_name=row.first_name,
-                  last_name=row.last_name, language_code=row.language_code,
-                  is_bot=int(row.is_bot))
-    tg_insert: insert = insert(tg_table).values(values).on_conflict_do_update(
-        index_elements=['ext_id'],
-        set_=values
-    )
-    logger.debug(f"Insert statement: {tg_insert}")
-    con.execute(tg_insert)
+def read_latest_message(chat_id: int, user_id: int, is_cmd_explicit=False, g3m_str='', menu_id='') -> G3Result[Row]:
+    with Engine_TG.connect() as con:
+        tg_table: Table = MetaData_TG.tables["tg_message"]
+        cols = tg_table.columns
+        sql_sel: Select = select(cols['tg_chat_id'], cols['ext_id'], cols['tg_user_id'],
+                                 cols['fwd_user_id'], cols['fwd_date'],
+                                 func.max(cols['date']).label('date'), cols['text'], cols['menu_id'])
+        where_clause = ((cols.tg_chat_id == chat_id) & (cols.tg_user_id == user_id) & (
+                cols.g3_cmd_explicit == is_cmd_explicit))
+        if g3m_str:
+            where_clause = (where_clause & (cols.bot_module == g3m_str))
+        if menu_id:
+            where_clause = (where_clause & (cols.menu_id == menu_id))
+        sql_sel = sql_sel.where(where_clause)
+
+        logger.debug(sql_sel)
+        rs: Result = con.execute(sql_sel)
+        result = rs.first()
+
+        if not result:
+            return G3Result(4)
+
+        return G3Result(0, result)
+
+
+def synchronize_user(row: User, con_: Connection = None):
+    def wrapped(con: Connection):
+        tg_table: Table = MetaData_TG.tables["tg_user"]
+        logger.debug(f"Table: {tg_table}")
+        logger.debug(f"Row: {row}")
+        values = dict(ext_id=row.id, username=row.username, first_name=row.first_name,
+                      last_name=row.last_name, language_code=row.language_code,
+                      is_bot=int(row.is_bot))
+        tg_insert: insert = insert(tg_table).values(values).on_conflict_do_update(
+            index_elements=['ext_id'],
+            set_=values
+        )
+        logger.debug(f"Insert statement: {tg_insert}")
+        con.execute(tg_insert)
+        return
+
+    if not con_:
+        with Engine_TG.connect() as con_:
+            return wrapped(con_)
+    else:
+        return wrapped(con_)
 
 
 def synchronize_chat(con: Connection, row: Chat):
@@ -118,19 +154,31 @@ def synchronize_chat(con: Connection, row: Chat):
 
 
 def synchronize_message(con: Connection,
-                        row: Message,
-                        g3_cmd_long_str: str = None, is_command_explicit: bool = None):
+                        msg: Message,
+                        g3_cmd_long_str: str = None, is_command_explicit: bool = False,
+                        g3_file: G3File = False,
+                        sub_module='', menu_id=''):
     tg_table: Table = MetaData_TG.tables["tg_message"]
     logger.debug(f"Table: {tg_table}")
-    logger.debug(f"Row: {row}")
-    bot_module: str = row.bot.username.split('_')[1]
+    logger.debug(f"Row: {msg}")
+    bot_module: str = msg.bot.username.split('_')[1]
+    is_g3_file = 0
+    text = msg.text
+    if g3_file:
+        is_g3_file = 1
+        text = g3_file.file_unique_id
     if bot_module == 'translate':
         bot_module = 'trans'
-    values = dict(ext_id=row.message_id, tg_user_id=row.from_user.id, tg_chat_id=row.chat.id,
-                  date=row.date.strftime('%Y-%m-%d %H:%M:%S'), text=row.text,
+    values = dict(ext_id=msg.message_id, tg_user_id=msg.from_user.id, tg_chat_id=msg.chat.id,
+                  date=msg.date.strftime('%Y-%m-%d %H:%M:%S'), text=text,
                   bot_module=bot_module,
-                  g3_cmd=g3_cmd_long_str, g3_cmd_explicit=is_command_explicit
+                  g3_cmd=g3_cmd_long_str, g3_cmd_explicit=is_command_explicit,
+                  g3_file=is_g3_file,
+                  sub_module=sub_module, menu_id=menu_id
                   )
+    if msg.forward_from:
+        values['fwd_user_id'] = msg.forward_from.id
+        values['fwd_date'] = msg.forward_date.strftime('%Y-%m-%d %H:%M:%S')
     tg_insert: insert = insert(tg_table).values(values).on_conflict_do_update(
         index_elements=['tg_chat_id', 'ext_id'],
         set_=values
@@ -141,7 +189,10 @@ def synchronize_message(con: Connection,
 
 
 def synchronize_from_message(
-        message: Message, g3_cmd_long_str: str = None, is_command_explicit: bool = None) \
+        message: Message,
+        g3_cmd_long_str: str = None, is_command_explicit: bool = None,
+        g3_file: G3File = None,
+        sub_module: str = '', menu_id: str = '') \
         -> None:
     """ Doc
     """
@@ -149,9 +200,9 @@ def synchronize_from_message(
         if not message.from_user:
             logger.error(f'message.from_user empty?')
         else:
-            synchronize_user(con, message.from_user)
+            synchronize_user(message.from_user, con)
         synchronize_chat(con, message.chat)
-        synchronize_message(con, message, g3_cmd_long_str, is_command_explicit)
+        synchronize_message(con, message, g3_cmd_long_str, is_command_explicit, g3_file, sub_module, menu_id)
 
 
 def externalize_user_id(bot_bkey: str, id_: int) -> None:
@@ -162,13 +213,34 @@ def externalize_chat_id(bot_bkey: str, id_: int) -> None:
     externalize_id(bot_bkey, TABLE_TG_CHAT, id_)
 
 
+def externalize_file_id(bot_bkey: str, id_: int) -> None:
+    externalize_id(bot_bkey, TABLE_FILE, id_)
+
+
+def upd_chat_last_msg(chat_id: int, message_id: int):
+    with Engine_TG.connect() as con:
+        tbl = MetaData_TG.tables['tg_chat']
+        stmnt = update(tbl).where(tbl.c.ext_id == chat_id).values({'last_msg_id': message_id})
+        con.execute(stmnt)
+
+
+def sel_chat_last_msg(chat_id: int) -> int:
+    with Engine_TG.connect() as con:
+        tbl = MetaData_TG.tables['tg_chat']
+        stmnt = select(tbl.c.last_msg_id).where(tbl.c.ext_id == chat_id)
+        rs: CursorResult = con.execute(stmnt)
+        if row := rs.first():
+            return row['last_msg_id']
+        return 0
+
+
 def externalize_id(bot_bkey: str, tg_tbl_name: str, id_: int) -> None:
     """
     Writes simply the id in the DB of the related satellite app.
     There is no validation of the id.
     """
     tbl_name = f'ext_{tg_tbl_name}'
-    ext_db_file = rf'C:\Users\IFLRGU\Documents\dev\g3b1_{bot_bkey}.db'
+    ext_db_file = rf'{env_g3b1_dir}\g3b1_{bot_bkey}.db'
     ext_meta_data = MetaData()
     ext_engine = create_engine(f"sqlite:///{ext_db_file}")
     ext_meta_data.reflect(bind=ext_engine)
@@ -202,6 +274,24 @@ def sel_msg_rng_by_chat_user(from_msg_id, chat_id, user_id) -> G3Result[list[dic
             msg_dct_li.append(d)
 
         return G3Result(0, msg_dct_li)
+
+
+def del_ent_ty(ent_id: EntId[ET], con: Connection = None) -> G3Result:
+    ent_ty = ent_id.ent_ty
+    from_row_any, md, eng = get_meta_attr(ent_ty)
+
+    # noinspection PyShadowingNames
+    def wrapped(con: Connection):
+        tbl: Table = md.tables[ent_ty.tbl_name]
+        stmnt: delete = delete(tbl).where(tbl.columns.id == ent_id.id)
+        con.execute(stmnt)
+        return G3Result(0)
+
+    if not con:
+        with eng.connect() as con:
+            return wrapped(con)
+    else:
+        return wrapped(con)
 
 
 def sel_ent_ty(ent_id: EntId[ET], con: Connection = None) -> G3Result[ET]:
@@ -287,37 +377,60 @@ def sel_ent_ty_by_par(ent: Any, ent_ty: ET, con: Connection = None) -> list[Any]
 def sel_ent_ty_li(ent_ty: EntTy) -> list[Row]:
     tbl: Table = G3Ctx.md.tables[ent_ty.tbl_name]
     chat_id = G3Ctx.chat_id()
+    user_id = G3Ctx.for_user_id()
     c = tbl.columns
     with G3Ctx.eng.begin() as con:
-        if 'chat_id' in c:
+        if 'user_id' in c and 'chat_id' in c:
+            stmnt = (select(tbl).
+                     where(c['chat_id'] == chat_id, c['user_id'] == user_id))
+        elif 'chat_id' in c:
             stmnt = (select(tbl).
                      where(c['chat_id'] == chat_id))
+        elif 'user_id' in c:
+            stmnt = (select(tbl).
+                     where(c['user_id'] == user_id))
         else:
             stmnt = (select(tbl))
         rs: CursorResult = con.execute(stmnt)
         return rs.fetchall()
 
 
-def ins_ent_ty(ent: Any) -> G3Result[Any]:
-    val_dct = asdict(ent)
-    new_val_dct: dict = {}
-    for k, v in val_dct.items():
-        if v is None:
-            continue
-        if isinstance(v, Enum):
-            new_val_dct[k] = v.value
-        elif isinstance(v, Dict):
-            new_val_dct[f'{k}_id'] = v['id_']
-        else:
-            new_val_dct[k] = v
-    with G3Ctx.eng.begin() as con:
-        tbl: Table = G3Ctx.md.tables[ent.ent_ty().tbl_name]
-        stmnt = (insert(tbl).
-                 values(new_val_dct))
+def upd_ent_ty(ent: Any, col_li: list[str] = None) -> Any:
+    val_dct = ent_as_dict_sql(ent, col_li)
+    ent_ty = EntTy.from_ent(ent)
+    ent_id = EntTy.ent_id(ent)
+    meta_tup: tuple[Callable[..., Any], MetaData, Engine] = get_meta_attr(ent_ty)
+    with meta_tup[2].begin() as con:
+        tbl: Table = meta_tup[1].tables[ent_ty.tbl_name]
+        stmnt = update(tbl).where(tbl.c.id == ent_id).values(val_dct)
+        # noinspection PyUnusedLocal
         rs: CursorResult = con.execute(stmnt)
+        # todo check update result:
+        ent_upd = sel_ent_ty(EntId(EntTy.from_ent(ent), ent_id), con).result
+        return ent_upd
+
+
+def ins_ent_ty(ent: Any) -> G3Result[Any]:
+    if hasattr(ent, 'as_dict'):
+        val_dct: dict = ent.as_dict()
+    else:
+        val_dct: dict = ent_as_dict_sql(ent)
+    val_dct = {k: v for k, v in val_dct.items() if v}
+    with G3Ctx.eng.begin() as con:
+        ent_ty = EntTy.from_ent(ent)
+
+        tbl: Table = G3Ctx.md.tables[ent_ty.tbl_name]
+        stmnt = (insert(tbl).
+                 values(val_dct))
+        try:
+            rs: CursorResult = con.execute(stmnt)
+        except IntegrityError as e:
+            logger.exception(e)
+            logger.error('Could not insert Learned, most likely due to UQ violation!')
+            return G3Result(4)
         if not (id_ := fetch_id(con, rs, tbl.name)):
             return G3Result(4)
-        g3r = sel_ent_ty(EntId(ent.ent_ty(), id_), con)
+        g3r = sel_ent_ty(EntId(EntTy.from_ent(ent), id_), con)
         return g3r
 
 

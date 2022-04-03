@@ -1,23 +1,25 @@
 import functools
 import importlib
 import logging
+from typing import Union
 
 from sqlalchemy import MetaData, Table, select
 from sqlalchemy.engine import Engine, Result, Row
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from telegram.ext import CallbackContext
 
 import tg_db
+from trans.data.model import MenuKeyboard
 from g3b1_cfg import tg_cfg
 from g3b1_cfg.tg_cfg import G3Ctx
 from g3b1_data import settings
-from g3b1_data.elements import ELE_TY_user_id, ELE_TY_su__user_id, ELE_TY_out__chat_id, EleTy
+from g3b1_data.elements import ELE_TY_user_id, ELE_TY_su__user_id, ELE_TY_out__chat_id
 from g3b1_data.entities import EntTy, EntId
 from g3b1_data.model import G3Command, MenuIt, Menu
 from g3b1_log.log import cfg_logger
 from g3b1_serv import utilities
 from g3b1_ui.model import TgUIC
-from settings import cu_setng
+from generic_mdl import ele_ty_by_id
 from sql_utils import sql_rs_2_tbl
 from subscribe.data.db import eng_SUB, md_SUB
 from subscribe.serv import services as sub_services
@@ -94,7 +96,7 @@ def tg_handler():
 
             idx_last_ctx_arg = len(ctx_args) - 1
             cmd_arg_li = [i for i in g3_cmd.extra_args() if
-                          (i.f_current == False)]  # skipping upd, chat_id, user_id and more
+                          (i.f_current is False)]  # skipping upd, chat_id, user_id and more
             for idx, item in enumerate(cmd_arg_li):
                 if idx <= idx_last_ctx_arg:
                     # if len(cmd_arg_li) == 1 and len(ctx_args):
@@ -122,10 +124,10 @@ def tg_handler():
 
             ent_ty_arg_li = g3_cmd.ent_ty_args()
             cmd_arg_li = [i for i in g3_cmd.extra_args() if
-                          (i.f_current == True and i not in ent_ty_arg_li)]
+                          (i.f_current is True and i not in ent_ty_arg_li)]
             for item in cmd_arg_li:
                 ele_ty_id = item.arg.replace('cur__', '')
-                if ele_ty := EleTy.by_id(ele_ty_id):  # one of tg_data package
+                if ele_ty := ele_ty_by_id(ele_ty_id, G3Ctx.g3_m_str):
                     ele_val = settings.read_setng(ele_ty)
                     if ele_val.val_mp:
                         kwargs.update({item.arg: ele_val.val_mp})
@@ -164,10 +166,10 @@ def tg_handler():
                 new_arg_li.append(upd)
             if g3_cmd.has_arg_ctx():
                 new_arg_li.append(ctx)
-            if g3_cmd.has_arg_reply_to_msg() or g3_cmd.has_arg_src_msg():
+            if g3_cmd.has_arg_reply_to_msg() or g3_cmd.has_arg_src_msg() or g3_cmd.has_arg_src_bot_msg():
                 if g3_cmd.has_arg_reply_to_msg():
                     new_arg_li.append(reply_to_msg)
-                if g3_cmd.has_arg_src_msg():
+                if g3_cmd.has_arg_src_msg() or g3_cmd.has_arg_src_bot_msg():
                     src_msg = None
                     if reply_to_msg:
                         src_msg = reply_to_msg
@@ -176,7 +178,12 @@ def tg_handler():
                             # src_msg is the message assumed to be the input for the command
                             # if no msg has been replied to
                             # it can not be safely guessed to be the latest chat-message
-                            src_msg = utilities.read_latest_message()
+                            if g3_cmd.has_arg_src_msg():
+                                # use user's latest message
+                                src_msg = utilities.read_latest_message()
+                            else:
+                                # use bot's latest message
+                                src_msg = utilities.read_latest_message(user_id=G3Ctx.ctx.bot.id)
                     new_arg_li.append(src_msg)
             if g3_cmd.has_arg_reply_to_user_id():
                 if reply_to_msg:
@@ -275,10 +282,11 @@ def send_ent_ty_keyboard(ent_ty: EntTy):
     reply_markup = ReplyKeyboardMarkup(keyboard,
                                        one_time_keyboard=True,
                                        resize_keyboard=True)
-    TgUIC.uic.send(ent_ty.keyboard_descr, reply_markup=reply_markup)
+    TgUIC.uic.send(ent_ty.keyboard_descr, menu_keyboard=reply_markup)
 
 
-def send_menu_keyboard(menu: Menu, mi_li: list[MenuIt]):
+def send_menu_keyboard(menu: Menu, mi_li: list[MenuIt], force_new_msg=False) -> Union[Message, str]:
+    """ Best to have buttons with command 'links'. See below 'define menu_id' """
     root_str = menu.lbl
     keyboard = []
     kb_row = []
@@ -287,6 +295,7 @@ def send_menu_keyboard(menu: Menu, mi_li: list[MenuIt]):
             keyboard.append(kb_row)
             kb_row = []
             continue
+        # define menu_id
         menu_id = ''
         if mi.menu:
             menu_id = mi.menu.id + ':'
@@ -302,7 +311,7 @@ def send_menu_keyboard(menu: Menu, mi_li: list[MenuIt]):
 
     if not root_str:
         root_str = 'Choose a menu item'
-    TgUIC.uic.send(root_str, reply_markup)
+    return TgUIC.uic.send(root_str, MenuKeyboard(menu, reply_markup), force_new_msg=force_new_msg)
 
 
 tg_cfg.init_cfg()

@@ -1,5 +1,7 @@
 import importlib
+import inspect
 import logging
+from functools import wraps
 from typing import Any, Callable
 
 from sqlalchemy import select, Column, ForeignKey, text, MetaData, Table
@@ -112,7 +114,7 @@ def orm(con: Connection, tbl: Table, row: Row, from_row_any: Callable, repl_dct=
             sql_stmnt = sql_stmnt.where(fk_tbl.columns.id == int(fk_ref_col_val))
             rs: CursorResult = con.execute(sql_stmnt)
             fk_ref_row: Row = rs.first()
-            ent_ty = ent_ty_by_tbl_name(fk_tbl.name, G3Ctx.g3_m_str)
+            ent_ty = ent_ty_by_tbl_name(fk_tbl.name, [G3Ctx.g3_m_str, 'subscribe'])
             repl_dct[col_id] = from_row_any(ent_ty, fk_ref_row, {})
             break
     return repl_dct

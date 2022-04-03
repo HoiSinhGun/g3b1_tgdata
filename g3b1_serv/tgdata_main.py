@@ -1,3 +1,4 @@
+import codecs
 import importlib
 import json
 import logging
@@ -7,9 +8,10 @@ from typing import Callable
 
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Engine
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, File
 from telegram.ext import CallbackContext, Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
+from constants import env_g3b1_dir
 from g3b1_cfg.tg_cfg import G3Ctx, init_g3_m, del_g3_m_by_file, init_g3_m_for_scripts, del_g3_m_of_scripts
 from g3b1_cfg.tg_cfg import sel_g3_m
 from g3b1_data import settings
@@ -83,6 +85,10 @@ def hdl_message(upd: Update, ctx: CallbackContext) -> None:
     pass
 
 
+def hdl_audio(upd: Update, ctx: CallbackContext) -> None:
+    sub_services.iup_g3_file_message()
+
+
 @generic_hdl.tg_handler()
 def bot(g3_m_str: str, cmd_prefix: str, uname: str) -> None:
     """If given as 1st arg sets the current bot. Otherwise sends a message with inline buttons to select the bot
@@ -129,7 +135,7 @@ def query_answer(upd: Update, ctx: CallbackContext) -> None:
             generic_hdl.cmd_ent_ty_33_li(upd, ctx, ent_ty=ent_ty)
             return
 
-    module = importlib.import_module(f'{g3_m_str}.tg_hdl')
+    module = importlib.import_module(f'{g3_m_str}.{g3_m_str}__tg_hdl')
     cmd_menu_func = getattr(module, 'cmd_menu')
     ctx.args = [mi_id]
     cmd_menu_func(upd, ctx)
@@ -140,7 +146,10 @@ def query_answer(upd: Update, ctx: CallbackContext) -> None:
 # noinspection PyDefaultArgument
 def start_bot(file: str,
               eng: Engine, md: MetaData,
-              hdl_for_message: Callable = hdl_message, script_li: list[str] = []):
+              hdl_for_message: Callable = hdl_message,
+              hdl_for_audio: Callable = hdl_audio,
+              hdl_for_start: Callable = start,
+              script_li: list[str] = []):
     # ,  hdl_for_start: callable = start, hdl_for_message: callable = hdl_message):
     """Run the bot."""
     G3Ctx.eng = eng
@@ -172,7 +181,11 @@ def start_bot(file: str,
     dispatcher.add_handler(CallbackQueryHandler(query_answer))
     dispatcher.add_handler(MessageHandler(
         Filters.text & ~Filters.command, hdl_for_message))
-    dispatcher.add_handler(CommandHandler('start', start))
+    dispatcher.add_handler(MessageHandler(
+        (Filters.voice | Filters.audio) & ~Filters.command, hdl_for_audio))
+    dispatcher.add_handler(MessageHandler(
+        (Filters.photo | Filters.video) & ~Filters.command, hdl_for_message))
+    dispatcher.add_handler(CommandHandler('start', hdl_for_start))
     command: G3Command
     for key, command in cmd_dct.items():
         logger.debug(f'Add handler for: {command.name} and {command.long_name}')
@@ -193,7 +206,29 @@ def start_bot(file: str,
     # Run the bot until you press Ctrl-C or the process receives SIGINT,
     # SIGTERM or SIGABRT. This should be used most of the time, since
     # start_polling() is non-blocking and will stop the bot gracefully.
-    updater.idle()
+    # updater.idle()
+    inp = ''
+    while inp != 'q':
+        inp = input()
+        if inp == 'imp_c_hi':
+            fl = rf'{env_g3b1_dir}\files\tg.json'
+            try:
+                with codecs.open(fl, encoding='utf-8') as file:
+                    file_content = file.read()
+                c_hi_d: dict = json.loads(file_content)
+                msg_d_li: list[dict[str, str]] = c_hi_d['messages']
+                txt_li: list[str] = [msg['text'] for msg in msg_d_li]
+                txt_set: set[str] = set()
+                for txt in txt_li:
+                    txt_set.add(str(txt))
+                for txt in txt_set:
+                    print(txt)
+                pass
+            except Exception as e:
+                logger.exception(e)
+                continue
+
+    exit()
 
 
 def filter_r_g3cmd(command: G3Command):

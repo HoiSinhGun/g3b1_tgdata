@@ -1,5 +1,5 @@
 import importlib
-from typing import Optional, TypeVar, Generic, Callable, Union
+from typing import Optional, TypeVar, Generic, Callable, Union, Any
 
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Engine
@@ -17,6 +17,20 @@ ET = TypeVar('ET')
 
 
 class EntTy(Generic[ET]):
+
+    @classmethod
+    def ent_id(cls, ent: Any):
+        if hasattr(ent, 'id'):
+            return ent.id
+        else:
+            return ent.id_
+
+    @classmethod
+    def from_ent(cls, ent: Any):
+        if hasattr(ent, 'id'):
+            return ent.ent_ty
+        else:
+            return ent.ent_ty()
 
     @staticmethod
     def by_id(id_: str) -> "EntTy":
@@ -90,6 +104,11 @@ class EntId(Generic[ET]):
         self.ent_ty = ent_ty
         self.id = id_
         self.g3_bot_id = g3_bot_id
+
+    @classmethod
+    def new(cls, ent: Any):
+        # not working for dataclasses with id attr = id_
+        return EntId(ent.ent_ty(), ent.id)
 
 
 def get_meta_attr(ent_ty: EntTy) -> (Callable, MetaData, Engine):

@@ -1,8 +1,8 @@
 import inspect
 import logging
 import os
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Tuple, Optional
 
 from sqlalchemy.engine import Row
 from telegram import Update, Message
@@ -31,6 +31,9 @@ def g3_cmd_by_func(cmd_func) -> G3Command:
     func_module_str = split[len(split) - 2]
     if 'generic_hdl' in split:
         func_module_str = 'generic'
+    if func_module_str.endswith('tg_hdl') and func_module_str.find('__') > -1:
+        func_s_li = func_module_str.split('__')
+        func_module_str = func_s_li[0]
     g3_m_str = func_module_str
     g3_m: G3Module = sel_g3_m(g3_m_str)
     prefix: str = f'cmd_'  # {g3_m_str}_'
@@ -85,11 +88,28 @@ def build_debug_str(update: Update) -> str:
            f'Your user id is <code>{update.effective_user.id}</code>.\n'
 
 
+def utc_to_vn_dt(utc_dt: datetime) -> datetime:
+    vn_dt = utc_dt + timedelta(hours=7)
+    return vn_dt
+
+
+def utc_to_vn_dt_s(utc_dt: datetime) -> str:
+    return utc_to_vn_dt(utc_dt).strftime('%Y-%m-%d %H:%M:%S')
+
+
 def now_for_sql() -> str:
     # datetime object containing current date and time
     now = datetime.now()
     # The sqlite datetime() function returns "YYYY-MM-DD HH:MM:SS
     dt_string = now.strftime("%Y-%m-%d %H:%M:%S")
+    return dt_string
+
+
+def now_for_fl() -> str:
+    # datetime object containing current date and time
+    now = datetime.now()
+    # YYYYMMDD-HHMMSS 20220207-050301
+    dt_string = now.strftime("%Y%m%d-%H%M%S")
     return dt_string
 
 
@@ -109,10 +129,12 @@ def read_latest_cmd(g3_m: G3Module) -> Message:
     return read_latest_message(is_cmd_explicit=True, g3_m=g3_m)
 
 
-def read_latest_message(is_cmd_explicit=False, g3_m: G3Module = None) -> Message:
+def read_latest_message(is_cmd_explicit=False, g3_m: G3Module = None, user_id: int = 0) -> Message:
     g3m_str = g3_m.name if g3_m else ''
-    row: Row = tg_db.read_latest_message(G3Ctx.chat_id(), G3Ctx.for_user_id(), is_cmd_explicit, g3m_str).result
-    if not row:
+    if not user_id:
+        user_id = G3Ctx.for_user_id()
+    row: Row = tg_db.read_latest_message(G3Ctx.chat_id(), user_id, is_cmd_explicit, g3m_str).result
+    if not row or not row['tg_user_id']:
         # noinspection PyTypeChecker
         return None
     dt_object = datetime.strptime(row['date'], '%Y-%m-%d %H:%M:%S')
@@ -122,4 +144,7 @@ def read_latest_message(is_cmd_explicit=False, g3_m: G3Module = None) -> Message
 
 
 def is_msg_w_cmd(text: str = None) -> bool:
+    if not text:
+        # uff, i dont know
+        return True
     return text.startswith('.') or text.startswith('/')

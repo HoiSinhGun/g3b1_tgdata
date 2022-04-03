@@ -7,10 +7,10 @@ from typing import Any
 
 from sqlalchemy import MetaData, create_engine, Table, delete, select, insert, asc
 from sqlalchemy.engine import Connection, CursorResult, Row, Engine
-from telegram import Update
+from telegram import Update, File
 from telegram.ext import CallbackContext
 
-from constants import cfg_base_dir_db, cfg_base_dir_code
+from constants import env_g3b1_dir, env_g3b1_code, g3b1_dir_files
 from elements import EleTy
 from g3b1_data.entities import EntTy
 from g3b1_data.model import G3Command, G3Module, G3Arg, script_by_file_str, G3Func
@@ -20,7 +20,7 @@ from py_meta import read_functions, read_function, build_module_str
 
 logger = cfg_logger(logging.getLogger(__name__), logging.WARN)
 
-db_file_cfg = rf'{cfg_base_dir_db}\g3b1_cfg.db'
+db_file_cfg = rf'{env_g3b1_dir}\g3b1_cfg.db'
 md_cfg = MetaData()
 eng_cfg = create_engine(f"sqlite:///{db_file_cfg}")
 
@@ -67,6 +67,22 @@ class G3Ctx:
         # cls.md = None
 
     @classmethod
+    def get_tg_files_dir(cls) -> str:
+        return g3b1_dir_files
+
+    @classmethod
+    def get_tg_voice_file(cls) -> File:
+        if cls.upd and cls.upd.effective_message.voice:
+            return cls.upd.effective_message.voice.get_file()
+
+    @classmethod
+    def get_tg_aud_or_voi_file(cls) -> File:
+        if cls.upd and cls.upd.effective_message.voice:
+            return cls.upd.effective_message.voice.get_file()
+        elif cls.upd and cls.upd.effective_message.audio:
+            return cls.upd.effective_message.audio.get_file()
+
+    @classmethod
     def chat_id(cls) -> int:
         if cls.upd:
             return cls.upd.effective_chat.id
@@ -87,6 +103,10 @@ class G3Ctx:
         if cls.su__user_id:
             return cls.su__user_id
         return cls.user_id()
+
+    @classmethod
+    def cu_tup(cls) -> (int, int):
+        return cls.chat_id(), cls.for_user_id()
 
 
 def init_g3_m(g3_m_file: str) -> G3Module:
@@ -176,7 +196,7 @@ def sel_g3_m(g3_m_str: str) -> G3Module:
     if g3_m_str == 'generic':
         module_hdl = importlib.import_module(f'g3b1_serv.generic_hdl')
     else:
-        module_hdl = importlib.import_module(f'{g3_m_str}.tg_hdl')
+        module_hdl = importlib.import_module(f'{g3_m_str}.{g3_m_str}__tg_hdl')
         module_mdl = importlib.import_module(f'{g3_m_str}.data.model')
         ent_ty_li = getattr(module_mdl, f'ENT_TY_{g3_m_str}_li')
     with eng_cfg.begin() as con:
@@ -219,12 +239,14 @@ def init_g3_m_dct():
     g3_m = sel_g3_m('generic')
     if not g3_m:
         # g3b1_tgdata\
-        generic_hdl_file_str = rf'{cfg_base_dir_code}\g3b1_tgdata\g3b1_serv\generic_hdl.py'
+        generic_hdl_file_str = rf'{env_g3b1_code}\g3b1_tgdata\g3b1_serv\generic_hdl.py'
         print('Initialize G3_M_DCT')
         g3_m: G3Module = G3Module(generic_hdl_file_str, {})
 
         func_def: FunctionDef = read_function(generic_hdl_file_str,
                                               'cmd_ent_ty_33_li')
+        module_hdl = importlib.import_module(f'g3b1_serv.generic_hdl')
+        cmd_ent_ty_33_li = getattr(module_hdl, 'cmd_ent_ty_33_li')
         # noinspection PyUnresolvedReferences
         g3_cmd: G3Command = G3Command(g3_m, cmd_ent_ty_33_li,
                                       [G3Arg(arg.arg, arg.annotation.id) for arg in func_def.args.args])
@@ -281,7 +303,7 @@ def init_db_cfg():
                         '"name"	TEXT NOT NULL,' \
                         '"long_name"	TEXT NOT NULL,' \
                         '"handler"	TEXT NOT NULL,' \
-                        'UNIQUE("g3_m_id", "name")' \
+                        'UNIQUE("g3_m_id", "name"),' \
                         'FOREIGN KEY ("g3_m_id") REFERENCES "g3_m"("id") ON DELETE CASCADE,' \
                         'PRIMARY KEY("id" AUTOINCREMENT))'
         g3_cmd_arg_create = 'CREATE TABLE IF NOT EXISTS  "g3_cmd_arg" (' \

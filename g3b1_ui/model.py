@@ -1,7 +1,8 @@
-from typing import Union
+from typing import Union, Callable
 
-from telegram import Update, ReplyMarkup
+from telegram import Update, ReplyMarkup, Message
 
+from data.model import MenuKeyboard
 from g3b1_data.elements import EleTy
 from g3b1_serv import tg_reply
 from g3b1_serv.generic_mdl import TgTable
@@ -27,7 +28,7 @@ class TgUIC:
 
     def err_p_404(self, p: Union[str, id], ele_ty: EleTy):
         """Instance for key p not found"""
-        tg_reply.cmd_err_key_not_found(self.upd, ele_ty.ent_ty.descr, str(p))
+        tg_reply.cmd_err_key_not_found(self.upd, ele_ty.descr, str(p))
 
     def err_p_miss(self, ele_ty: EleTy):
         tg_reply.cmd_p_req(self.upd, ele_ty.descr)
@@ -35,15 +36,22 @@ class TgUIC:
     def err_setng_miss(self, ele_ty: EleTy):
         self.error(f'Command failed! Setting: {ele_ty.descr} ({ele_ty.id_}) is missing!')
 
-    def send(self, send_str: str, reply_markup: ReplyMarkup = None) -> str:
+    def send(self, send_str: str, menu_keyboard: Union[MenuKeyboard, ReplyMarkup] = None, force_new_msg=False) -> \
+            Union[Message, str]:
         if TgUIC.f_send:
-            tg_reply.send(self.upd, send_str, reply_markup)
+            return tg_reply.send(self.upd, send_str, menu_keyboard, force_new_msg=force_new_msg)
         else:
             TgUIC.send_str_li.append(send_str)
         return send_str
 
+    def send_audio(self, fl_s: str, caption_s: str, title=''):
+        tg_reply.send_audio(self.upd, fl_s, caption_s, title)
+
     def err_no_select(self) -> str:
         return self.error('Select an entry!')
+
+    def err_no_data(self) -> str:
+        return self.error('No data found!')
 
     def no_data(self):
         tg_reply.no_data(self.upd)

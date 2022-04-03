@@ -118,7 +118,20 @@ def ent_ty_by_tbl_name(tbl_name: str, g3_m_str) -> "EntTy":
             return ent
 
 
+def ent_ty_by_id(ent_id: str, g3_m_str) -> "EntTy":
+    for ent in get_ent_ty_li(g3_m_str):
+        if ent.tbl_name == ent_id:
+            return ent
+
+
 def ele_ty_by_ent_ty(ent_ty: EntTy) -> "EleTy":
     for ele in get_ele_ty_li(ent_ty.g3_m_str):
         if ele.ent_ty == ent_ty:
             return ele
+
+
+def ele_ty_by_id(id_: str, g3_m_str: str) -> "EleTy":
+    for ele in get_ele_ty_li(g3_m_str):
+        if ele.id_ == id_:
+            return ele
+

@@ -84,9 +84,14 @@ ELE_TY_descr = EleTy(id_='descr', descr='Description', ui_len=20)
 ELE_TY_txt = EleTy(id_='txt', descr='Text', ui_len=20)
 ELE_TY_sel_idx_rng = EleTy(id_='sel_idx_rng', descr='Idx Range', ui_len=10)
 ELE_TY_amnt = EleTy(id_='amnt', descr='Amount', ui_len=13, type=int)
+ELE_TY_area = EleTy(id_='area', descr='Area', ui_len=13)
 ELE_TY_tst_type = EleTy(id_='tst_type', descr='Type', ui_len=10)
 ELE_TY_su__user_id = EleTy(id_='su__user_id', descr='SU User', ui_len=10)
 ELE_TY_user_id = EleTy(id_='user_id', descr='User', col_name='tg_user_id', ui_len=10)
+
+ELE_TY_ins_tst = EleTy(id_='ins_tst', descr='Insert TST', ui_len=23)
+ELE_TY_stop_tst = EleTy(id_='stop_tst', descr='Stop TST', ui_len=23)
+
 ELE_TY_lc = EleTy(id_='lc', descr='LC', ui_len=2)
 ELE_TY_lc2 = EleTy(id_='lc2', descr='L2', col_name='lc2', ui_len=2)
 ELE_TY_lc_pair = EleTy(id_='lc_pair', descr='LC-L2', ui_len=5, ele_ty_tup=(ELE_TY_lc, ELE_TY_lc2))
@@ -101,6 +106,7 @@ ELE_TY_tst_mode.key_li = [dict(key='tst_mode_ed', descr='Admin: insert and updat
 
 ELE_TY_li = [ELE_TY_bkey, ELE_TY_tst_type, ELE_TY_sel_idx_rng,
              ELE_TY_txt, ELE_TY_descr, ELE_TY_amnt,
+             ELE_TY_area,
              ELE_TY_lc, ELE_TY_lc2, ELE_TY_lc_pair,
              ELE_TY_user_id, ELE_TY_chat_id, ELE_TY_su__user_id, ELE_TY_out__chat_id,
              ELE_TY_cmd, ELE_TY_cmd_prefix, ELE_TY_send_onyms,

@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+import sys
 from sqlite3 import Error
 
 from sqlalchemy import event
@@ -8,7 +9,9 @@ from sqlalchemy.event import listen
 from sqlalchemy.pool import Pool
 from telegram import Message, Chat, User  # noqa
 
-DB_FILE=r'C:\Users\IFLRGU\Documents\dev\g3b1_tg.db'
+from constants import env_g3b1_dir
+
+DB_FILE = rf'{env_g3b1_dir}\g3b1_tg.db'
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -118,6 +121,7 @@ if __name__ == '__main__':
 def my_on_connect(dbapi_con, connection_record):
     pass
     # print("New DBAPI connection:", dbapi_con)
+
 
 listen(Pool, 'connect', my_on_connect)
 
